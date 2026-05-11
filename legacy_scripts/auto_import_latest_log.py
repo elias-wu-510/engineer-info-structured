@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -10,9 +11,9 @@ from log_to_feishu import split_segments, parse_segment, rows_to_csv
 from extract_engineering_messages import extract_messages, looks_like_engineering_message
 from feishu_bitable_import import get_tenant_access_token, parse_csv_text, upload_records, CSV_COLUMNS
 
-DEFAULT_LOG_DIR = Path('/home/claw/workspace/insp-bot/logs/120363425741086960@g.us')
-DEFAULT_STATE = Path('/home/claw/.openclaw/workspace-engineer-info-structured/.openclaw/feishu-import-state.json')
-DEFAULT_POLICY = Path('/home/claw/.openclaw/workspace-engineer-info-structured/.openclaw/import-policy.json')
+DEFAULT_LOG_DIR = Path(os.environ.get('ENGINEER_LOG_DIR', './logs'))
+DEFAULT_STATE = Path(os.environ.get('ENGINEER_IMPORT_STATE_FILE', '.state/feishu-import-state.json'))
+DEFAULT_POLICY = Path(os.environ.get('ENGINEER_POLICY_FILE', '.state/import-policy.json'))
 
 
 def row_fingerprint(row: dict) -> str:
