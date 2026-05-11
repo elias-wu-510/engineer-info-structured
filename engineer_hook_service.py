@@ -9,13 +9,14 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 LEGACY_DIR = SCRIPT_DIR / 'legacy_scripts'
-WORKSPACE_DIR = Path('/home/claw/.openclaw/workspace-engineer-info-structured')
-DEFAULT_LOG_DIR = Path('/home/claw/workspace/insp-bot/logs/120363425741086960@g.us')
-DEFAULT_ENV_FILE = WORKSPACE_DIR / '.env.feishu'
-DEFAULT_STATE_FILE = WORKSPACE_DIR / '.openclaw' / 'engineer-info-structured-hook-state.json'
-DEFAULT_TARGET_GROUP = '120363425741086960@g.us'
-DEFAULT_SEND_URL = 'http://127.0.0.1:3081/send'
-DEFAULT_REACT_URL = 'http://127.0.0.1:3081/react'
+DEFAULT_ENV_FILE = SCRIPT_DIR / '.env'
+DEFAULT_LOG_DIR = None
+DEFAULT_STATE_FILE = SCRIPT_DIR / '.state' / 'engineer-info-structured-hook-state.json'
+DEFAULT_IMPORT_STATE_FILE = SCRIPT_DIR / '.state' / 'feishu-import-state.json'
+DEFAULT_POLICY_FILE = SCRIPT_DIR / '.state' / 'import-policy.json'
+DEFAULT_TARGET_GROUP = None
+DEFAULT_SEND_URL = None
+DEFAULT_REACT_URL = None
 SUMMARY_RE = re.compile(r'(?:总结|總結|summary)', re.I)
 LOG_MSG_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] \[LOG\] 文本消息内容: (?P<content>.*)$')
 RECEIVED_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] 收到消息，.*?msgId: (?P<msg_id>[^,]+)')
@@ -29,7 +30,6 @@ from auto_import_latest_log import (  # noqa: E402
     parse_start_time,
     row_fingerprint,
     save_state as save_import_state,
-    DEFAULT_POLICY,
 )
 from log_to_feishu import rows_to_csv  # noqa: E402
 from feishu_bitable_import import get_tenant_access_token, parse_csv_text, upload_records  # noqa: E402
@@ -224,22 +224,31 @@ def run_once(args, service_state: dict):
     return service_state
 
 
+def env_value(name: str, default: str | None = None, required: bool = False) -> str | None:
+    value = os.environ.get(name, default)
+    if required and not value:
+        raise SystemExit(f'Missing required environment variable: {name}')
+    return value
+
+
 def main():
+    load_dotenv(DEFAULT_ENV_FILE)
     p = argparse.ArgumentParser(description='Engineer info structured long-running hook: import Feishu and send WhatsApp summary on 總結')
-    p.add_argument('--log-dir', default=str(DEFAULT_LOG_DIR))
+    p.add_argument('--log-dir', default=env_value('ENGINEER_LOG_DIR', DEFAULT_LOG_DIR, required=True))
     p.add_argument('--env-file', default=str(DEFAULT_ENV_FILE))
-    p.add_argument('--state-file', default=str(DEFAULT_STATE_FILE))
-    p.add_argument('--import-state-file', default=str(WORKSPACE_DIR / '.openclaw' / 'feishu-import-state.json'))
-    p.add_argument('--policy-file', default=str(DEFAULT_POLICY))
-    p.add_argument('--target-group', default=DEFAULT_TARGET_GROUP)
-    p.add_argument('--send-url', default=os.environ.get('ENGINEER_SEND_URL', DEFAULT_SEND_URL))
-    p.add_argument('--react-url', default=os.environ.get('ENGINEER_REACT_URL', DEFAULT_REACT_URL))
+    p.add_argument('--state-file', default=env_value('ENGINEER_STATE_FILE', str(DEFAULT_STATE_FILE)))
+    p.add_argument('--import-state-file', default=env_value('ENGINEER_IMPORT_STATE_FILE', str(DEFAULT_IMPORT_STATE_FILE)))
+    p.add_argument('--policy-file', default=env_value('ENGINEER_POLICY_FILE', str(DEFAULT_POLICY_FILE)))
+    p.add_argument('--target-group', default=env_value('ENGINEER_TARGET_GROUP', DEFAULT_TARGET_GROUP, required=True))
+    p.add_argument('--send-url', default=env_value('ENGINEER_SEND_URL', DEFAULT_SEND_URL, required=True))
+    p.add_argument('--react-url', default=env_value('ENGINEER_REACT_URL', DEFAULT_REACT_URL, required=True))
     p.add_argument('--interval', type=float, default=5.0)
     p.add_argument('--once', action='store_true')
     p.add_argument('--dry-run', action='store_true')
     args = p.parse_args()
 
-    load_dotenv(Path(args.env_file))
+    if Path(args.env_file) != DEFAULT_ENV_FILE:
+        load_dotenv(Path(args.env_file))
     state_path = Path(args.state_file)
     state = load_json(state_path, {'log_offsets': {}})
 
