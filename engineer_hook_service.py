@@ -16,8 +16,10 @@ DEFAULT_ENV_FILE = WORKSPACE_DIR / '.env.feishu'
 DEFAULT_STATE_FILE = WORKSPACE_DIR / '.openclaw' / 'engineer-info-structured-hook-state.json'
 DEFAULT_TARGET_GROUP = '120363425741086960@g.us'
 DEFAULT_SEND_URL = 'http://127.0.0.1:3081/send'
+DEFAULT_REACT_URL = 'http://127.0.0.1:3081/react'
 SUMMARY_RE = re.compile(r'(?:总结|總結|summary)', re.I)
 LOG_MSG_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] \[LOG\] 文本消息内容: (?P<content>.*)$')
+RECEIVED_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] 收到消息，.*?msgId: (?P<msg_id>[^,]+)')
 
 sys.path.insert(0, str(LEGACY_DIR))
 from auto_import_latest_log import (  # noqa: E402
@@ -80,12 +82,25 @@ def read_new_bytes(path: Path, state: dict):
     return data
 
 
-def contains_summary_trigger(text: str) -> bool:
+def find_summary_trigger_message_id(text: str) -> str | None:
+    current_msg_id = None
     for line in text.splitlines():
+        received = RECEIVED_RE.match(line)
+        if received:
+            msg_id = received.group('msg_id').strip()
+            current_msg_id = msg_id if msg_id and msg_id.lower() != 'undefined' else None
+            continue
         m = LOG_MSG_RE.match(line)
         if m and SUMMARY_RE.search(m.group('content').strip()):
-            return True
-    return False
+            return current_msg_id
+    return None
+
+
+def contains_summary_trigger(text: str) -> bool:
+    return find_summary_trigger_message_id(text) is not None or any(
+        (m := LOG_MSG_RE.match(line)) and SUMMARY_RE.search(m.group('content').strip())
+        for line in text.splitlines()
+    )
 
 
 def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, dry_run=False):
@@ -142,6 +157,31 @@ def build_summary(rows: list[dict]) -> str:
     return '\n'.join(blocks).strip()
 
 
+def send_reaction(message_id: str | None, emoji: str, react_url: str, dry_run=False):
+    if not message_id:
+        return
+    payload = {'messageId': message_id, 'emoji': emoji}
+    if dry_run:
+        print('REACTION DRY RUN:')
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    import urllib.request
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(react_url, data=data, method='POST')
+    req.add_header('Content-Type', 'application/json; charset=utf-8')
+    secret = os.environ.get('SEND_API_SECRET')
+    if secret:
+        req.add_header('x-api-secret', secret)
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        body = resp.read().decode('utf-8')
+    try:
+        result = json.loads(body)
+    except Exception:
+        result = {'raw': body}
+    if not result.get('ok'):
+        raise RuntimeError(f'Reaction failed: {result}')
+
+
 def send_whatsapp(to: str, message: str, send_url: str, dry_run=False):
     payload = {'to': to, 'message': message}
     if dry_run:
@@ -175,8 +215,11 @@ def run_once(args, service_state: dict):
     if created:
         print(f'Imported {created} new rows from {log_file.name}', flush=True)
     if new_text and contains_summary_trigger(new_text):
+        trigger_msg_id = find_summary_trigger_message_id(new_text)
+        send_reaction(trigger_msg_id, '👀', args.react_url, dry_run=args.dry_run)
         summary = build_summary(rows)
         send_whatsapp(args.target_group, summary, args.send_url, dry_run=args.dry_run)
+        send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent WhatsApp summary to {args.target_group}', flush=True)
     service_state['last_log'] = str(log_file)
     return service_state
@@ -191,6 +234,7 @@ def main():
     p.add_argument('--policy-file', default=str(DEFAULT_POLICY))
     p.add_argument('--target-group', default=DEFAULT_TARGET_GROUP)
     p.add_argument('--send-url', default=os.environ.get('ENGINEER_SEND_URL', DEFAULT_SEND_URL))
+    p.add_argument('--react-url', default=os.environ.get('ENGINEER_REACT_URL', DEFAULT_REACT_URL))
     p.add_argument('--interval', type=float, default=5.0)
     p.add_argument('--once', action='store_true')
     p.add_argument('--dry-run', action='store_true')
