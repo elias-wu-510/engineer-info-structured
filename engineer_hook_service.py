@@ -16,7 +16,7 @@ DEFAULT_ENV_FILE = WORKSPACE_DIR / '.env.feishu'
 DEFAULT_STATE_FILE = WORKSPACE_DIR / '.openclaw' / 'engineer-info-structured-hook-state.json'
 DEFAULT_TARGET_GROUP = '120363425741086960@g.us'
 DEFAULT_SEND_URL = 'http://127.0.0.1:3081/send'
-SUMMARY_RE = re.compile(r'(?:總結|总结)')
+SUMMARY_RE = re.compile(r'^总结$')
 LOG_MSG_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] \[LOG\] 文本消息内容: (?P<content>.*)$')
 
 sys.path.insert(0, str(LEGACY_DIR))
@@ -83,7 +83,7 @@ def read_new_bytes(path: Path, state: dict):
 def contains_summary_trigger(text: str) -> bool:
     for line in text.splitlines():
         m = LOG_MSG_RE.match(line)
-        if m and SUMMARY_RE.search(m.group('content')):
+        if m and SUMMARY_RE.fullmatch(m.group('content').strip()):
             return True
     return False
 
