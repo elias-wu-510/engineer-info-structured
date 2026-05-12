@@ -552,6 +552,12 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
             return {"分判": current_contractor, "工序": task, "人數": count, "分區": zone}
 
     if current_contractor and is_valid_contractor(current_contractor) and before:
+        zone_new, before_no_zone = extract_zone(before)
+        new_contractor, new_task = split_by_known_task(before_no_zone)
+        if new_contractor and new_task:
+            task = final_clean_task((new_task + " " + after).strip())
+            if task:
+                return {"分判": new_contractor, "工序": task, "人數": count, "分區": zone_new}
         zone, task = extract_zone(before)
         task = clean_task(task)
         after_task = clean_task(after)
@@ -658,6 +664,10 @@ def parse_segment(seg: dict):
         if floor_only:
             context["樓層"] = normalize_floor_value(floor_only.group(1))
             pending_floor = context["樓層"]
+            # Zone headings like ST01 should not leak to subsequent explicit floors.
+            if context.get("分區") and re.fullmatch(r"[A-Za-z]+\d+", context["分區"]):
+                context["分區"] = None
+            current_contractor = None
             continue
 
         building_floor = re.match(r"^(?P<building>[A-Za-z]座|Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+)\s+(?P<floor>(?:\d+|[A-Za-z]+)/[Ff])$", line, re.I)
