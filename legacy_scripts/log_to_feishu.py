@@ -553,6 +553,11 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
 
     if current_contractor and is_valid_contractor(current_contractor) and before:
         zone_new, before_no_zone = extract_zone(before)
+        known_contractor2, known_task2 = split_known_contractor(before_no_zone)
+        if known_contractor2 and known_task2:
+            task = final_clean_task((known_task2 + " " + after).strip())
+            if task:
+                return {"分判": known_contractor2, "工序": task, "人數": count, "分區": zone_new}
         new_contractor, new_task = split_by_known_task(before_no_zone)
         if new_contractor and new_task:
             task = final_clean_task((new_task + " " + after).strip())
