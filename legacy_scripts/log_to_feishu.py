@@ -10,9 +10,9 @@ from feishu_bitable_import import CSV_COLUMNS, get_tenant_access_token, upload_r
 
 DATE_RE = re.compile(r"(\d{4}/\d{1,2}/\d{1,2}|\d{1,2}/\d{1,2}/\d{4}|\d{1,2}/\d{1,2}/\d{2}(?:\([^)]*\))?|\d{1,2}-\d{1,2}-\d{4}|\d{1,2}月\d{1,2}日)")
 BUILDING_RE = re.compile(r"(Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+|[A-Za-z]座|[A-Za-z]棟)", re.I)
-FLOOR_RE = re.compile(r"((?:(?:\d+|[A-Za-z]+)/[Ff])(?:至(?:\d+|[A-Za-z]+)/[Ff])?(?:及(?:\d+|[A-Za-z]+)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|B\d+|M/[Ff]|m/[Ff])")
+FLOOR_RE = re.compile(r"((?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|B\d+|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
 ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+[A-Za-z]?)*|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
-HEADCOUNT_RE = re.compile(r"(\d+)人")
+HEADCOUNT_RE = re.compile(r"[（(]?(\d+)人[）)]?")
 SEGMENT_HEADER_RE = re.compile(r"^\[(?P<ts>\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2})\]\s*(?P<user>.*?):\s*(?P<body>.*)$")
 SEGMENT_START_RE = re.compile(r"^\[\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2}\]\s*.*?:")
 NON_WORK_PREFIXES = ("收到消息", "[DEBUG", "[LOG]")
@@ -30,7 +30,7 @@ KNOWN_TASKS = [
     "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
     "洗地", "扶手電梯位砌磚", "地台轉吼", "泵水", "開料", "裝喉", "燈喉",
     "釘板", "燒焊", "上拆", "搭架", "清垃圾", "信号员", "裝套筒", "裝馬仔",
-    "紮陣鐵", "紮柱鐵", "樓窿開線", "點焊", "用蜘蛛車裝碼仔", "執九劈架位", "樓邊打地台碼石矢", "外棚清垃圾", "執石矢defect", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "开墨", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
+    "紮陣鐵", "紮柱鐵", "外牆作石矢Cut鐵", "外牆作石矢", "全層撞膠筒，撩膠杯", "全層撞膠筒", "運身橋做保護", "清石矢頭", "外牆打拆石矢", "点焊及回焊", "較碼", "较码", "全層測量", "測量", "樓窿開線", "點焊", "用蜘蛛車裝碼仔", "執九劈架位", "樓邊打地台碼石矢", "外棚清垃圾", "執石矢defect", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "开墨", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
 ]
 
 
@@ -115,6 +115,10 @@ def normalize_date(text: str | None):
 def clean_task(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text.strip(" -—,:：.。")
+
+
+def strip_list_marker(text: str) -> str:
+    return re.sub(r"^\s*\d+[)）.]\s*", "", text).strip()
 
 
 def extract_zone(text: str):
@@ -313,6 +317,14 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
             if task:
                 return {"分判": known_contractor, "工序": task, "人數": count, "分區": zone_after or zone_before}
 
+    known_contractor, known_task = split_known_contractor(before)
+    if known_contractor and (known_task or after):
+        zone_before, before_no_zone = extract_zone(known_task or "")
+        zone_after, after_no_zone = extract_zone(after)
+        task = clean_task((before_no_zone + " " + after_no_zone).strip())
+        if task:
+            return {"分判": known_contractor, "工序": task, "人數": count, "分區": zone_before or zone_after}
+
     if current_contractor and is_valid_contractor(current_contractor) and not before:
         zone, task = extract_zone(after)
         task = clean_task(task)
@@ -384,6 +396,7 @@ def parse_segment(seg: dict):
     pending_task_line = None
 
     for line in lines:
+        line = strip_list_marker(line)
         pending_colon = parse_colon_headcount_with_pending(line, pending_task_line)
         if pending_colon:
             rows.append({
@@ -407,6 +420,8 @@ def parse_segment(seg: dict):
         bm = BUILDING_RE.search(line)
         if bm:
             context["樓棟"] = bm.group(1)
+            if "外牆" in line:
+                context["分區"] = "外牆"
 
         floor_only = FLOOR_RE.fullmatch(line)
         if floor_only:
