@@ -82,7 +82,7 @@ def read_new_bytes(path: Path, state: dict):
     return data
 
 
-def find_summary_trigger_message_id(text: str) -> str | None:
+def find_summary_trigger(text: str) -> tuple[str | None, str | None]:
     current_msg_id = None
     for line in text.splitlines():
         received = RECEIVED_RE.match(line)
@@ -91,16 +91,21 @@ def find_summary_trigger_message_id(text: str) -> str | None:
             current_msg_id = msg_id if msg_id and msg_id.lower() != 'undefined' else None
             continue
         m = LOG_MSG_RE.match(line)
-        if m and SUMMARY_RE.search(m.group('content').strip()):
-            return current_msg_id
-    return None
+        if m:
+            content = m.group('content').strip()
+            if SUMMARY_RE.search(content):
+                return current_msg_id, content
+    return None, None
+
+
+def find_summary_trigger_message_id(text: str) -> str | None:
+    msg_id, _ = find_summary_trigger(text)
+    return msg_id
 
 
 def contains_summary_trigger(text: str) -> bool:
-    return find_summary_trigger_message_id(text) is not None or any(
-        (m := LOG_MSG_RE.match(line)) and SUMMARY_RE.search(m.group('content').strip())
-        for line in text.splitlines()
-    )
+    _, content = find_summary_trigger(text)
+    return content is not None
 
 
 def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, dry_run=False):
@@ -158,16 +163,43 @@ def date_sort_key(value: str):
     return (9999, 99, 99, value)
 
 
-def build_summary(rows: list[dict]) -> str:
+def parse_requested_summary_date(text: str | None) -> str | None:
+    text = str(text or '')
+    patterns = [
+        r'(20\d{2})[/-](\d{1,2})[/-](\d{1,2})',
+        r'(\d{1,2})[/-](\d{1,2})[/-](20\d{2})',
+        r'(\d{1,2})月(\d{1,2})日',
+    ]
+    m = re.search(patterns[0], text)
+    if m:
+        y, mo, d = m.groups()
+        return f'{int(d):02d}/{int(mo):02d}/{y}'
+    m = re.search(patterns[1], text)
+    if m:
+        d, mo, y = m.groups()
+        return f'{int(d):02d}/{int(mo):02d}/{y}'
+    m = re.search(patterns[2], text)
+    if m:
+        mo, d = m.groups()
+        return f'{int(d):02d}/{int(mo):02d}/2026'
+    return None
+
+
+def build_summary(rows: list[dict], requested_date: str | None = None) -> str:
     if not rows:
         return '今日無工地記錄。'
 
     by_date = {}
     for r in rows:
         date_label = display_record_date(r.get('日期'))
+        if requested_date and date_label != requested_date:
+            continue
         building = (r.get('樓棟') or '未標明樓棟').strip() or '未標明樓棟'
         floor = (r.get('樓層') or '未標明樓層').strip() or '未標明樓層'
         by_date.setdefault(date_label, {}).setdefault(building, {}).setdefault(floor, []).append(r)
+
+    if requested_date and not by_date:
+        return f'{requested_date}\n今日無工地記錄。'
 
     blocks = []
     for date_label in sorted(by_date, key=date_sort_key):
@@ -268,11 +300,12 @@ def run_once(args, service_state: dict):
 
     # Summary trigger must stay responsive even if Feishu import is slow/stuck.
     if new_text and contains_summary_trigger(new_text):
-        trigger_msg_id = find_summary_trigger_message_id(new_text)
-        print(f'Summary trigger detected in {log_file.name}: {trigger_msg_id or "no-msg-id"}', flush=True)
+        trigger_msg_id, trigger_text = find_summary_trigger(new_text)
+        requested_date = parse_requested_summary_date(trigger_text)
+        print(f'Summary trigger detected in {log_file.name}: {trigger_msg_id or "no-msg-id"} requested_date={requested_date or "all"}', flush=True)
         send_reaction(trigger_msg_id, '👀', args.react_url, dry_run=args.dry_run)
         rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
-        summary = build_summary(rows)
+        summary = build_summary(rows, requested_date=requested_date)
         send_whatsapp(args.target_group, summary, args.send_url, dry_run=args.dry_run)
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent WhatsApp summary to {args.target_group}', flush=True)
