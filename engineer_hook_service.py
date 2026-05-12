@@ -139,29 +139,55 @@ def floor_sort_key(floor: str):
     return (int(nums[0]) if nums else 9999, s)
 
 
+def display_record_date(value: str | None) -> str:
+    raw = str(value or '').strip()
+    if not raw or raw.lower() == 'null':
+        return '未標明日期'
+    m = re.fullmatch(r'(\d{1,2})/(\d{1,2})/(\d{4})', raw)
+    if m:
+        d, mo, y = m.groups()
+        return f'{int(d):02d}/{int(mo):02d}/{y}'
+    return raw
+
+
+def date_sort_key(value: str):
+    m = re.fullmatch(r'(\d{2})/(\d{2})/(\d{4})', value)
+    if m:
+        d, mo, y = m.groups()
+        return (int(y), int(mo), int(d), value)
+    return (9999, 99, 99, value)
+
+
 def build_summary(rows: list[dict]) -> str:
     if not rows:
         return '今日無工地記錄。'
-    grouped = {}
+
+    by_date = {}
     for r in rows:
+        date_label = display_record_date(r.get('日期'))
         building = (r.get('樓棟') or '未標明樓棟').strip() or '未標明樓棟'
         floor = (r.get('樓層') or '未標明樓層').strip() or '未標明樓層'
-        grouped.setdefault(building, {}).setdefault(floor, []).append(r)
+        by_date.setdefault(date_label, {}).setdefault(building, {}).setdefault(floor, []).append(r)
+
     blocks = []
-    for building in sorted(grouped):
-        blocks.append(building)
-        floors = grouped[building]
-        for floor in sorted(floors, key=floor_sort_key):
-            blocks.append(floor)
-            for r in floors[floor]:
-                contractor = (r.get('分判') or '未標明分判').strip()
-                count = (r.get('人數') or 'null').strip()
-                task = (r.get('工序') or '').strip()
-                zone = (r.get('分區') or '').strip()
-                task_text = f'{zone} {task}'.strip() if zone and zone.lower() != 'null' else task
-                count_text = f'{count}人' if count.isdigit() else ''
-                blocks.append(f'{contractor}：{count_text} {task_text}'.rstrip())
-            blocks.append('')
+    for date_label in sorted(by_date, key=date_sort_key):
+        blocks.append(date_label)
+        grouped = by_date[date_label]
+        for building in sorted(grouped):
+            blocks.append(building)
+            floors = grouped[building]
+            for floor in sorted(floors, key=floor_sort_key):
+                blocks.append(floor)
+                for r in floors[floor]:
+                    contractor = (r.get('分判') or '未標明分判').strip()
+                    count = (r.get('人數') or 'null').strip()
+                    task = (r.get('工序') or '').strip()
+                    zone = (r.get('分區') or '').strip()
+                    task_text = f'{zone} {task}'.strip() if zone and zone.lower() != 'null' else task
+                    count_text = f'{count}人' if count.isdigit() else ''
+                    blocks.append(f'{contractor}：{count_text} {task_text}'.rstrip())
+                blocks.append('')
+        blocks.append('')
     return '\n'.join(blocks).strip()
 
 
