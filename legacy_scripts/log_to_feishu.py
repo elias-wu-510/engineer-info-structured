@@ -41,6 +41,8 @@ def is_valid_contractor(value: str | None) -> bool:
     value = value.strip().rstrip(":：")
     if re.match(r"^\d", value):
         return False
+    if re.fullmatch(r"[A-Z]座", value):
+        return False
     # 分判必须是中文词组；纯数字/英文/编号（如 ST01）只能作为区域/备注，不能作为分判。
     return bool(re.search(r"[\u4e00-\u9fff]", value))
 
@@ -172,6 +174,17 @@ def normalize_task_name(task: str | None) -> str:
     return clean_task(task)
 
 
+def final_clean_task(task: str | None, building: str | None = None) -> str:
+    task = normalize_task_name(task)
+    if building:
+        task = task.replace(building, "")
+    task = re.sub(r"^[A-Z]座", "", task)
+    task = re.sub(r"\b全層", "", task)
+    task = re.sub(r"^[，,、\s之]+", "", task)
+    task = re.sub(r"\s+", " ", task)
+    return clean_task(task)
+
+
 def strip_list_marker(text: str) -> str:
     return re.sub(r"^\s*\d+[)）.]\s*", "", text).strip()
 
@@ -249,6 +262,8 @@ def looks_like_contractor_heading(line: str) -> bool:
     if not is_valid_contractor(value):
         return False
     if re.match(r"^\d", value):
+        return False
+    if re.fullmatch(r"[A-Z]座", value):
         return False
     if ZONE_INLINE_RE.search(value) or contains_known_task(value):
         return False
@@ -501,6 +516,13 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
         if task:
             return {"分判": known_contractor, "工序": task, "人數": count, "分區": zone_before or zone_after}
 
+    # Lines like C座12/F... may have no explicit contractor; do not infer C座 as 分判.
+    if re.match(r"^[A-Z]座", before):
+        zone_b, task_b = extract_zone(before)
+        task_b = final_clean_task(task_b)
+        if current_contractor and is_valid_contractor(current_contractor) and task_b:
+            return {"分判": current_contractor, "工序": task_b, "人數": count, "分區": zone_b}
+
     if current_contractor and is_valid_contractor(current_contractor) and not before:
         zone, task = extract_zone(after)
         task = clean_task(task)
@@ -590,7 +612,7 @@ def parse_segment(seg: dict):
                 "樓棟": context["樓棟"] or "null",
                 "樓層": pending_colon.get("樓層") or context["樓層"] or "null",
                 "分判": pending_colon["分判"],
-                "工序": normalize_task_name(pending_colon["工序"]),
+                "工序": final_clean_task(pending_colon["工序"], context.get("樓棟")),
                 "人數": pending_colon["人數"],
                 "原始消息": body,
             })
@@ -674,7 +696,7 @@ def parse_segment(seg: dict):
                     "樓棟": context["樓棟"] or "null",
                     "樓層": row_floor or "null",
                     "分判": inline_row["分判"],
-                    "工序": normalize_task_name(inline_row["工序"]),
+                    "工序": final_clean_task(inline_row["工序"], context.get("樓棟")),
                     "人數": inline_row["人數"],
                     "原始消息": body,
                 })
