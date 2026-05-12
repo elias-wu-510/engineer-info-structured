@@ -380,7 +380,10 @@ def parse_no_headcount_record(line: str, current_contractor: str | None):
                     contractor = m.group("contractor")
                     task = clean_task(m.group("task"))
     if contractor and is_valid_contractor(contractor) and task:
-        return {"分判": contractor, "工序": task, "人數": "null", "分區": zone}
+        # Only emit no-headcount records when the line starts with a contractor, e.g. 陳橋 zone 5 噴漿.
+        # Location/task pending lines like 15樓南面... should wait for the following 分判：人數 line.
+        if line.strip().startswith(contractor):
+            return {"分判": contractor, "工序": task, "人數": "null", "分區": zone}
     return None
 
 
@@ -464,7 +467,7 @@ def split_floor_task_line(line: str):
 def parse_colon_headcount_with_pending(line: str, pending_task_line: str | None):
     if not pending_task_line:
         return None
-    m = re.match(r"^(?P<contractor>[\u4e00-\u9fffA-Za-z0-9·•\-~  ]{2,20})[:：]\s*(?P<count>\d+)人\s*$", line)
+    m = re.match(r"^(?P<contractor>.+?)[:：]\s*(?P<count>\d+)人\s*$", line)
     if not m:
         return None
     contractor = normalize_contractor_name(m.group("contractor"))
