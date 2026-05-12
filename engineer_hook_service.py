@@ -204,23 +204,37 @@ def send_whatsapp(to: str, message: str, send_url: str, dry_run=False):
         raise RuntimeError(f'WhatsApp send failed: {result}')
 
 
+def parse_rows_for_summary(log_file: Path, import_state_file: Path, policy_file: Path) -> list[dict]:
+    import_state = load_import_state(import_state_file)
+    policy = load_policy(policy_file)
+    start_time = parse_start_time(import_state.get('startTime'))
+    return parse_rows_from_log(log_file, start_time=start_time, policy=policy)
+
+
 def run_once(args, service_state: dict):
     log_file = latest_log_or_none(Path(args.log_dir))
     if not log_file:
         print(f'No log files found in {args.log_dir}', flush=True)
         return service_state
+
     new_text = read_new_bytes(log_file, service_state)
-    created, rows, new_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run)
-    if created:
-        print(f'Imported {created} new rows from {log_file.name}', flush=True)
+    service_state['last_log'] = str(log_file)
+
+    # Summary trigger must stay responsive even if Feishu import is slow/stuck.
     if new_text and contains_summary_trigger(new_text):
         trigger_msg_id = find_summary_trigger_message_id(new_text)
+        print(f'Summary trigger detected in {log_file.name}: {trigger_msg_id or "no-msg-id"}', flush=True)
         send_reaction(trigger_msg_id, '👀', args.react_url, dry_run=args.dry_run)
+        rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
         summary = build_summary(rows)
         send_whatsapp(args.target_group, summary, args.send_url, dry_run=args.dry_run)
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent WhatsApp summary to {args.target_group}', flush=True)
-    service_state['last_log'] = str(log_file)
+
+    print(f'Checking Feishu import for {log_file.name}', flush=True)
+    created, rows, new_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run)
+    if created:
+        print(f'Imported {created} new rows from {log_file.name}', flush=True)
     return service_state
 
 
