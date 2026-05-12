@@ -502,6 +502,7 @@ def parse_segment(seg: dict):
                 "分判": pending_colon["分判"],
                 "工序": normalize_task_name(pending_colon["工序"]),
                 "人數": pending_colon["人數"],
+                "原始消息": body,
             })
             pending_task_line = None
             continue
@@ -582,6 +583,7 @@ def parse_segment(seg: dict):
                     "分判": inline_row["分判"],
                     "工序": normalize_task_name(inline_row["工序"]),
                     "人數": inline_row["人數"],
+                    "原始消息": body,
                 })
             pending_task_line = None
         elif (
