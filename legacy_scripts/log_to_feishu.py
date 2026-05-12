@@ -78,6 +78,19 @@ def split_segments(text: str, group_sender: str = "null", group_sent_time: str =
             yield {"發布用戶": group_sender or "null", "發送時間": group_sent_time or "null", "body": raw.strip()}
 
 
+def normalize_building(value: str | None):
+    if not value:
+        return None
+    text = re.sub(r"\s+", "", value.strip())
+    m = re.fullmatch(r"(?:Block|Blk)([A-Za-z]+)", text, re.I)
+    if m:
+        return f"{m.group(1).upper()}座"
+    m = re.fullmatch(r"([A-Za-z]+)[座棟]", text, re.I)
+    if m:
+        return f"{m.group(1).upper()}座"
+    return value.strip()
+
+
 def normalize_zone(z: str | None):
     if not z:
         return None
@@ -434,7 +447,7 @@ def parse_segment(seg: dict):
 
         bm = BUILDING_RE.search(line)
         if bm:
-            context["樓棟"] = bm.group(1)
+            context["樓棟"] = normalize_building(bm.group(1))
             if "外牆" in line:
                 context["分區"] = "外牆"
 
@@ -446,7 +459,7 @@ def parse_segment(seg: dict):
 
         building_floor = re.match(r"^(?P<building>[A-Za-z]座|Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+)\s+(?P<floor>(?:\d+|[A-Za-z]+)/[Ff])$", line, re.I)
         if building_floor:
-            context["樓棟"] = building_floor.group("building")
+            context["樓棟"] = normalize_building(building_floor.group("building"))
             context["樓層"] = building_floor.group("floor")
             current_contractor = None
             continue
@@ -459,7 +472,7 @@ def parse_segment(seg: dict):
         compact_heading = re.fullmatch(r"(?P<date>\d{1,2}-\d{1,2}-\d{4})\s+(?P<building>[A-Za-z]座|[A-Za-z]棟)\s*(?P<floor>[A-Za-z]摟|[A-Za-z]樓|(?:\d+|[A-Za-z]+)/[Ff])", line, re.I)
         if compact_heading:
             context["日期"] = normalize_date(compact_heading.group("date"))
-            context["樓棟"] = compact_heading.group("building")
+            context["樓棟"] = normalize_building(compact_heading.group("building"))
             context["樓層"] = compact_heading.group("floor")
             current_contractor = None
             continue
