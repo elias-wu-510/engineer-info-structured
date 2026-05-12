@@ -24,7 +24,7 @@ KNOWN_CONTRACTORS = [
 ]
 
 KNOWN_TASKS = [
-    "安裝Drywall", "BS opening 吊板", "鏟地台+清理", "鏟地台", "跟炮尾清泥頭", "清場", "磚牆",
+    "安裝Drywall", "BS Opening吊板", "BS opening 吊板", "鑽窿", "鏟地台+清理", "鏟地台", "跟炮尾清泥頭", "清場", "磚牆",
     "公眾位出泥柱", "公眾位包角", "產地台", "跟炮尾", "磚牆釘網", "磚牆包角",
     "出泥柱", "砌磚", "批幼料", "砌磚牆", "牆身釘網", "大機房噴油漆",
     "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
@@ -159,6 +159,8 @@ def extract_zone(text: str):
         return None, text
     zone = normalize_zone(m.group(1))
     remaining = clean_task((text[:m.start()] + " " + text[m.end():]).strip())
+    remaining = re.sub(r"[（(]\s*[）)]", "", remaining)
+    remaining = clean_task(remaining)
     return zone, remaining
 
 
@@ -245,6 +247,46 @@ def parse_compact_no_space(before: str, current_contractor: str | None):
     return None, None, zone
 
 
+def split_task_items(text: str) -> list[str]:
+    text = clean_task(text)
+    if not text:
+        return []
+    parts = []
+    current = []
+    depth = 0
+    for ch in text:
+        if ch in "（(":
+            depth += 1
+        elif ch in "）)" and depth:
+            depth -= 1
+        if depth == 0 and ch in "、,，":
+            part = clean_task("".join(current))
+            if part:
+                parts.append(part)
+            current = []
+        else:
+            current.append(ch)
+    part = clean_task("".join(current))
+    if part:
+        parts.append(part)
+    return parts
+
+
+def parse_counted_task_items(text: str) -> list[dict]:
+    items = []
+    pattern = re.compile(r"(?P<count>\d+)人(?P<task>.*?)(?=(?:[、,，]\s*\d+人)|$)")
+    for m in pattern.finditer(text):
+        count = m.group("count")
+        task_text = clean_task(m.group("task"))
+        if not task_text:
+            continue
+        zone, task = extract_zone(task_text)
+        task = clean_task(task)
+        if task:
+            items.append({"工序": task, "人數": count, "分區": zone})
+    return items
+
+
 def parse_colon_form(line: str):
     colon_parts = re.split(r"[:：]", line, maxsplit=1)
     if len(colon_parts) != 2:
@@ -254,25 +296,27 @@ def parse_colon_form(line: str):
     if not left:
         return None
 
-    # Forms like: 仙壁7人:安裝Drywall頂底槽&企骨、封板（Zone2、3）
-    # Also handle: 順利3人:1人K 11 ACPD鑽窿（Zone2）, where task-level count after colon wins.
     left_count = HEADCOUNT_RE.search(left)
     rest_count = HEADCOUNT_RE.search(rest)
     if left_count:
         contractor = clean_task(left[:left_count.start()])
         if not is_valid_contractor(contractor):
             return None
-        if rest_count:
-            count = rest_count.group(1)
-            task_text = clean_task((rest[:rest_count.start()] + " " + rest[rest_count.end():]).strip())
-        else:
-            count = left_count.group(1)
-            task_text = clean_task(rest)
-        zone, task = extract_zone(task_text)
-        task = clean_task(task)
-        if not task:
-            return None
-        return {"分判": contractor, "工序": task, "人數": count, "分區": zone}
+
+        # Form: 順利3人：1人鏟地台、2人清場（Zone4、5）
+        counted_items = parse_counted_task_items(rest)
+        if counted_items:
+            return [{"分判": contractor, **item} for item in counted_items]
+
+        # Form: 順利6人：BS Opening吊板、鑽窿（Zone4、5）、鏟地台（Zone4）
+        count = left_count.group(1)
+        rows = []
+        for task_text in split_task_items(rest):
+            zone, task = extract_zone(task_text)
+            task = clean_task(task)
+            if task:
+                rows.append({"分判": contractor, "工序": task, "人數": count, "分區": zone})
+        return rows or None
 
     contractor = left
     m = rest_count
@@ -505,17 +549,19 @@ def parse_segment(seg: dict):
         if not inline and not HEADCOUNT_RE.search(line_for_record):
             inline = parse_no_headcount_record(line_for_record, current_contractor)
         if inline:
-            rows.append({
-                "發布用戶": seg["發布用戶"],
-                "發送時間": seg["發送時間"],
-                "日期": context["日期"] or "null",
-                "分區": inline.get("分區") or context["分區"] or "null",
-                "樓棟": context["樓棟"] or "null",
-                "樓層": row_floor or "null",
-                "分判": inline["分判"],
-                "工序": inline["工序"],
-                "人數": inline["人數"],
-            })
+            inline_rows = inline if isinstance(inline, list) else [inline]
+            for inline_row in inline_rows:
+                rows.append({
+                    "發布用戶": seg["發布用戶"],
+                    "發送時間": seg["發送時間"],
+                    "日期": context["日期"] or "null",
+                    "分區": inline_row.get("分區") or context["分區"] or "null",
+                    "樓棟": context["樓棟"] or "null",
+                    "樓層": row_floor or "null",
+                    "分判": inline_row["分判"],
+                    "工序": inline_row["工序"],
+                    "人數": inline_row["人數"],
+                })
             pending_task_line = None
         elif (
             not HEADCOUNT_RE.search(line)
