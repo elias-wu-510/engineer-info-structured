@@ -23,6 +23,16 @@ KNOWN_CONTRACTORS = [
     "浩洲", "安全外勞", "安全外",
 ]
 
+KNOWN_TASKS = [
+    "安裝Drywall", "BS opening 吊板", "鏟地台", "跟炮尾清泥頭", "清場", "磚牆",
+    "公眾位出泥柱", "公眾位包角", "產地台", "跟炮尾", "磚牆釘網", "磚牆包角",
+    "出泥柱", "砌磚", "批幼料", "砌磚牆", "牆身釘網", "大機房噴油漆",
+    "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
+    "洗地", "扶手電梯位砌磚", "地台轉吼", "泵水", "開料", "裝喉", "燈喉",
+    "釘板", "燒焊", "上拆", "搭架", "清垃圾", "信号员", "裝套筒", "裝馬仔",
+    "紮陣鐵", "紮柱鐵", "开墨", "冷氣", "消防", "電燈",
+]
+
 
 def is_valid_contractor(value: str | None) -> bool:
     if not value:
@@ -114,6 +124,32 @@ def split_known_contractor(base: str):
     return None, None
 
 
+def split_by_known_task(base: str):
+    compact = re.sub(r"\s+", "", base)
+    for task in sorted(KNOWN_TASKS, key=len, reverse=True):
+        task_compact = re.sub(r"\s+", "", task)
+        idx = compact.find(task_compact)
+        if idx <= 0:
+            continue
+        # Map compact index back approximately by scanning the original string.
+        consumed = 0
+        original_idx = None
+        for i, ch in enumerate(base):
+            if ch.isspace():
+                continue
+            if consumed == idx:
+                original_idx = i
+                break
+            consumed += 1
+        if original_idx is None:
+            continue
+        contractor = clean_task(base[:original_idx])
+        task_text = clean_task(base[original_idx:])
+        if is_valid_contractor(contractor) and task_text:
+            return contractor, task_text
+    return None, None
+
+
 def parse_compact_no_space(before: str, current_contractor: str | None):
     zone, base = extract_zone(before)
     contractor = current_contractor
@@ -131,10 +167,15 @@ def parse_compact_no_space(before: str, current_contractor: str | None):
             contractor = known_contractor
             task = known_task
         else:
-            m = re.match(r"^(?P<contractor>[\u4e00-\u9fffA-Za-z0-9]{2,6})(?P<task>.+)$", base)
-            if m:
-                contractor = m.group("contractor")
-                task = clean_task(m.group("task"))
+            task_contractor, task_text = split_by_known_task(base)
+            if task_contractor and task_text:
+                contractor = task_contractor
+                task = task_text
+            else:
+                m = re.match(r"^(?P<contractor>[\u4e00-\u9fff]{2,6})(?P<task>.+)$", base)
+                if m:
+                    contractor = m.group("contractor")
+                    task = clean_task(m.group("task"))
 
     if contractor and is_valid_contractor(contractor) and task:
         return contractor, task, zone
