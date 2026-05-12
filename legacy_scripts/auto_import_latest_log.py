@@ -63,6 +63,18 @@ def trusted_sender_match(msg: dict, policy: dict) -> bool:
     return any(m in haystack for m in matchers)
 
 
+def normalized_digits(value: str) -> str:
+    return re.sub(r"\D+", "", str(value or ""))
+
+
+def excluded_sender_match(msg: dict, policy: dict) -> bool:
+    excluded = [normalized_digits(x) for x in policy.get('excludedSenderNumbers', []) if normalized_digits(x)]
+    if not excluded:
+        return False
+    sender_number = normalized_digits(msg.get('sender_number', ''))
+    return sender_number in excluded
+
+
 def normalize_structured_text(text: str) -> str:
     text = text.replace('—', ' ')
     text = text.replace('–', '-')
@@ -97,6 +109,8 @@ def parse_rows_from_log(log_file: Path, start_time=None, policy=None) -> list[di
                 continue
             if msg_time < start_time:
                 continue
+        if excluded_sender_match(msg, policy):
+            continue
         if not looks_like_engineering_message(msg['text']):
             continue
         if trusted_only and not trusted_sender_match(msg, policy):
