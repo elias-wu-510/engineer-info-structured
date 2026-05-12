@@ -165,6 +165,8 @@ TASK_NORMALIZATION = [
 
 def normalize_task_name(task: str | None) -> str:
     task = clean_task(task or "")
+    task = re.sub(r"\bN牌\s*x?\s*\d+\b", "", task, flags=re.I)
+    task = re.sub(r"\bN牌x\d+\b", "", task, flags=re.I)
     for src, dst in TASK_NORMALIZATION:
         task = task.replace(src, dst)
     return clean_task(task)
