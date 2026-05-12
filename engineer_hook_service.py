@@ -168,7 +168,7 @@ def parse_requested_summary_date(text: str | None) -> str | None:
     patterns = [
         r'(20\d{2})[/-](\d{1,2})[/-](\d{1,2})',
         r'(\d{1,2})[/-](\d{1,2})[/-](20\d{2})',
-        r'(\d{1,2})[/-](\d{1,2})(?![/-]\d)',
+        r'(\d{1,2})/(\d{1,2})(?!/\d)',
         r'(\d{1,2})月(\d{1,2})日',
     ]
     m = re.search(patterns[0], text)
