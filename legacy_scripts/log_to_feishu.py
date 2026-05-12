@@ -11,7 +11,7 @@ from feishu_bitable_import import CSV_COLUMNS, get_tenant_access_token, upload_r
 DATE_RE = re.compile(r"(\d{4}/\d{1,2}/\d{1,2}|\d{1,2}/\d{1,2}/\d{4}|\d{1,2}/\d{1,2}/\d{2}(?:\([^)]*\))?|\d{1,2}-\d{1,2}-\d{4}|\d{1,2}月\d{1,2}日)")
 BUILDING_RE = re.compile(r"(Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+|[A-Za-z]座|[A-Za-z]棟)", re.I)
 FLOOR_RE = re.compile(r"((?:(?:\d+|[A-Za-z]+)/[Ff])(?:至(?:\d+|[A-Za-z]+)/[Ff])?(?:及(?:\d+|[A-Za-z]+)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|B\d+|M/[Ff]|m/[Ff])")
-ZONE_INLINE_RE = re.compile(r"([Zz]one\s*[0-9A-Za-z、,，]+|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
+ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+[A-Za-z]?)*|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
 HEADCOUNT_RE = re.compile(r"(\d+)人")
 SEGMENT_HEADER_RE = re.compile(r"^\[(?P<ts>\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2})\]\s*(?P<user>.*?):\s*(?P<body>.*)$")
 SEGMENT_START_RE = re.compile(r"^\[\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2}\]\s*.*?:")
@@ -30,7 +30,7 @@ KNOWN_TASKS = [
     "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
     "洗地", "扶手電梯位砌磚", "地台轉吼", "泵水", "開料", "裝喉", "燈喉",
     "釘板", "燒焊", "上拆", "搭架", "清垃圾", "信号员", "裝套筒", "裝馬仔",
-    "紮陣鐵", "紮柱鐵", "开墨", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
+    "紮陣鐵", "紮柱鐵", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "开墨", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
 ]
 
 
@@ -226,6 +226,37 @@ def parse_colon_form(line: str):
     return {"分判": contractor, "工序": task, "人數": count, "分區": zone}
 
 
+def parse_no_headcount_record(line: str, current_contractor: str | None):
+    # Allow records without explicit headcount, e.g. 陳橋 zone 5 噴漿.
+    zone, base = extract_zone(line)
+    base = clean_task(base)
+    if not base:
+        return None
+    contractor = None
+    task = None
+    if current_contractor and is_valid_contractor(current_contractor):
+        contractor = current_contractor
+        task = base
+    else:
+        known_contractor, known_task = split_known_contractor(base)
+        if known_contractor and known_task:
+            contractor = known_contractor
+            task = known_task
+        else:
+            task_contractor, task_text = split_by_known_task(base)
+            if task_contractor and task_text:
+                contractor = task_contractor
+                task = task_text
+            else:
+                m = re.match(r"^(?P<contractor>[\u4e00-\u9fff]{2,6})\s*(?P<task>.+)$", base)
+                if m:
+                    contractor = m.group("contractor")
+                    task = clean_task(m.group("task"))
+    if contractor and is_valid_contractor(contractor) and task:
+        return {"分判": contractor, "工序": task, "人數": "null", "分區": zone}
+    return None
+
+
 def maybe_extract_inline_record(line: str, current_contractor: str | None):
     colon_form = parse_colon_form(line)
     if colon_form:
@@ -240,7 +271,7 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
     after = clean_task(line[m.end():])
 
     if not current_contractor and before:
-        if before in KNOWN_CONTRACTORS:
+        if is_valid_contractor(before):
             zone_after, after_no_zone = extract_zone(after)
             task = clean_task(after_no_zone)
             if task:
@@ -354,6 +385,8 @@ def parse_segment(seg: dict):
             row_floor = pending_floor
 
         inline = maybe_extract_inline_record(line_for_record, current_contractor)
+        if not inline and not HEADCOUNT_RE.search(line_for_record):
+            inline = parse_no_headcount_record(line_for_record, current_contractor)
         if inline:
             rows.append({
                 "發布用戶": seg["發布用戶"],
