@@ -25,7 +25,7 @@ KNOWN_CONTRACTORS = [
 ]
 
 KNOWN_TASKS = [
-    "安裝Drywall", "BS Opening吊板", "BS opening 吊板", "鑽窿", "鏟地台+清理", "鏟地台", "石矢", "墨斗", "跟炮尾清泥頭", "清場", "磚牆",
+    "安裝Drywall", "BS Opening吊板", "BS opening 吊板", "鑽窿", "鏟地台+清理", "鏟地台", "剷地台", "炮尾", "石矢", "墨斗", "跟炮尾清泥頭", "清場", "磚牆",
     "公眾位出泥柱", "公眾位包角", "產地台", "跟炮尾", "磚牆釘網", "磚牆包角",
     "出泥柱", "砌磚", "批幼料", "砌磚牆", "牆身釘網", "大機房噴油漆",
     "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
@@ -402,10 +402,58 @@ def parse_no_headcount_record(line: str, current_contractor: str | None):
     return None
 
 
+def parse_multi_headcount_inline(line: str, current_contractor: str | None):
+    matches = list(HEADCOUNT_RE.finditer(line))
+    if len(matches) < 2:
+        return None
+
+    first = matches[0]
+    prefix = clean_task(line[:first.start()])
+    zone, prefix_no_zone = extract_zone(prefix)
+    contractor = None
+    first_task = None
+
+    known_contractor, known_task = split_known_contractor(prefix_no_zone)
+    if known_contractor:
+        contractor = known_contractor
+        first_task = known_task
+    else:
+        contractor_candidate, task_candidate = split_by_known_task(prefix_no_zone)
+        if contractor_candidate:
+            contractor = contractor_candidate
+            first_task = task_candidate
+        elif current_contractor and is_valid_contractor(current_contractor):
+            contractor = current_contractor
+            first_task = prefix_no_zone
+
+    if not contractor or not is_valid_contractor(contractor):
+        return None
+
+    rows = []
+    task = normalize_task_name(first_task)
+    if task:
+        rows.append({"分判": contractor, "工序": task, "人數": first.group(1), "分區": zone})
+
+    for idx in range(1, len(matches)):
+        m = matches[idx]
+        prev = matches[idx - 1]
+        between = clean_task(line[prev.end():m.start()])
+        item_zone, item_task = extract_zone(between)
+        item_task = normalize_task_name(item_task)
+        if item_task:
+            rows.append({"分判": contractor, "工序": item_task, "人數": m.group(1), "分區": item_zone or zone})
+
+    return rows or None
+
+
 def maybe_extract_inline_record(line: str, current_contractor: str | None):
     colon_form = parse_colon_form(line)
     if colon_form:
         return colon_form
+
+    multi_form = parse_multi_headcount_inline(line, current_contractor)
+    if multi_form:
+        return multi_form
 
     m = HEADCOUNT_RE.search(line)
     if not m:
