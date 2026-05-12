@@ -473,9 +473,16 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
     after = clean_task(line[m.end():])
 
     if not current_contractor and before:
+        zone_before_early, before_no_zone_early = extract_zone(before)
+        task_contractor_early, task_text_early = split_by_known_task(before_no_zone_early)
+        if task_contractor_early and task_text_early:
+            zone_after, after_no_zone = extract_zone(after)
+            task = normalize_task_name((task_text_early + " " + after_no_zone).strip())
+            if task:
+                return {"分判": task_contractor_early, "工序": task, "人數": count, "分區": zone_before_early or zone_after}
         if is_valid_contractor(before):
             zone_after, after_no_zone = extract_zone(after)
-            task = clean_task(after_no_zone)
+            task = normalize_task_name(after_no_zone)
             if task:
                 return {"分判": before, "工序": task, "人數": count, "分區": zone_after}
         known_contractor, prefix_task = split_known_contractor(before)
