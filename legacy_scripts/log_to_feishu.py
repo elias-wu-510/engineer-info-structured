@@ -11,7 +11,7 @@ from feishu_bitable_import import CSV_COLUMNS, get_tenant_access_token, upload_r
 DATE_RE = re.compile(r"(\d{4}[/-]\d{1,2}[/-]\d{1,2}(?:\s*星期[一二三四五六日天])?|(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}/\d{1,2})(?:[（(][^）)]*[）)])?|\d{1,2}月\d{1,2}日)")
 BUILDING_RE = re.compile(r"(Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+|[A-Za-z]座|[A-Za-z]棟)", re.I)
 FLOOR_RE = re.compile(r"((?:\d+~\d+/[Ff]|\d+(?:,\d+)+/[Ff]|\d+[Ff])|(?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
-ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+(?:[-‑–—]\d+)?[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+(?:[-‑–—]\d+)?[A-Za-z]?)*|[東西南北]{1,2}面\s+[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}|[東西南北]{1,2}面\s+[A-Z]\d{1,2}|西面及北面|東面及北面|西面及南面|東面及南面|東北面|西北面|東南面|西南面|[東西南北]{1,2}面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
+ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+(?:[-‑–—]\d+)?[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+(?:[-‑–—]\d+)?[A-Za-z]?)*|[東西南北]{1,2}面\s+[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}|[東西南北]{1,2}面\s+[A-Z]\d{1,2}|西面及北面|東面及北面|西面及南面|東面及南面|東北面|西北面|東南面|西南面|[東西南北]{1,2}面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}(?:\s*~\s*[A-Z]{1,2})?|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
 HEADCOUNT_RE = re.compile(r"[（(]?(\d+)人[）)]?")
 SEGMENT_HEADER_RE = re.compile(r"^\[(?P<ts>\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2})\]\s*(?P<user>.*?):\s*(?P<body>.*)$")
 SEGMENT_START_RE = re.compile(r"^\[\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2}\]\s*.*?:")
@@ -209,14 +209,20 @@ def extract_floors(text: str) -> tuple[str | None, str]:
 
 
 def extract_zone(text: str):
-    m = ZONE_INLINE_RE.search(text)
-    if not m:
-        return None, text
-    zone = normalize_zone(m.group(1))
-    remaining = clean_task((text[:m.start()] + " " + text[m.end():]).strip())
+    return extract_zones(text)
+
+
+def extract_zones(text: str):
+    zones = []
+    def repl(m):
+        z = normalize_zone(m.group(1))
+        if z and z not in zones:
+            zones.append(z)
+        return " "
+    remaining = ZONE_INLINE_RE.sub(repl, text)
     remaining = re.sub(r"[（(]\s*[）)]", "", remaining)
     remaining = clean_task(remaining)
-    return zone, remaining
+    return (" / ".join(zones) if zones else None), remaining
 
 
 def split_known_contractor(base: str):
