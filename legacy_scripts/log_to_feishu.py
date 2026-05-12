@@ -10,7 +10,7 @@ from feishu_bitable_import import CSV_COLUMNS, get_tenant_access_token, upload_r
 
 DATE_RE = re.compile(r"(\d{4}/\d{1,2}/\d{1,2}|\d{1,2}/\d{1,2}/\d{4}|\d{1,2}/\d{1,2}/\d{2}(?:\([^)]*\))?|\d{1,2}-\d{1,2}-\d{4}|\d{1,2}月\d{1,2}日)")
 BUILDING_RE = re.compile(r"(Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+|[A-Za-z]座|[A-Za-z]棟)", re.I)
-FLOOR_RE = re.compile(r"((?:\d+~\d+/[Ff]|\d+(?:,\d+)+/[Ff])|(?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|B\d+|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
+FLOOR_RE = re.compile(r"((?:\d+~\d+/[Ff]|\d+(?:,\d+)+/[Ff])|(?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
 ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+[A-Za-z]?)*|[東西南北]{1,2}面|西面及北面|東面及北面|西面及南面|東面及南面|[東西南北]{1,2}面\s+[A-Z]\d{1,2}|東北面|西北面|東南面|西南面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
 HEADCOUNT_RE = re.compile(r"[（(]?(\d+)人[）)]?")
 SEGMENT_HEADER_RE = re.compile(r"^\[(?P<ts>\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2})\]\s*(?P<user>.*?):\s*(?P<body>.*)$")
