@@ -30,7 +30,7 @@ KNOWN_TASKS = [
     "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
     "洗地", "扶手電梯位砌磚", "地台轉吼", "泵水", "開料", "裝喉", "燈喉",
     "釘板", "燒焊", "上拆", "搭架", "清垃圾", "信号员", "裝套筒", "裝馬仔",
-    "紮陣鐵", "紮柱鐵", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "开墨", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
+    "紮陣鐵", "紮柱鐵", "樓窿開線", "點焊", "用蜘蛛車裝碼仔", "執九劈架位", "樓邊打地台碼石矢", "外棚清垃圾", "執石矢defect", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "开墨", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
 ]
 
 
@@ -40,6 +40,15 @@ def is_valid_contractor(value: str | None) -> bool:
     value = value.strip().rstrip(":：")
     # 分判必须是中文词组；纯数字/英文/编号（如 ST01）只能作为区域/备注，不能作为分判。
     return bool(re.search(r"[\u4e00-\u9fff]", value))
+
+
+ROLE_SUFFIX_RE = re.compile(r"(?:墨斗工|焊工|炮手|男工|女工|工人|師傅)$")
+
+
+def normalize_contractor_name(value: str | None) -> str:
+    value = clean_task(value or "")
+    value = ROLE_SUFFIX_RE.sub("", value).strip()
+    return value
 
 
 def split_segments(text: str, group_sender: str = "null", group_sent_time: str = "null"):
@@ -150,6 +159,24 @@ def split_by_known_task(base: str):
     return None, None
 
 
+def contains_known_task(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text or "")
+    return any(re.sub(r"\s+", "", task) in compact for task in KNOWN_TASKS)
+
+
+def looks_like_contractor_heading(line: str) -> bool:
+    value = line.rstrip(":：").strip()
+    if not is_valid_contractor(value):
+        return False
+    if re.match(r"^\d", value):
+        return False
+    if ZONE_INLINE_RE.search(value) or contains_known_task(value):
+        return False
+    if len(value) > 12:
+        return False
+    return True
+
+
 def parse_compact_no_space(before: str, current_contractor: str | None):
     zone, base = extract_zone(before)
     contractor = current_contractor
@@ -229,6 +256,8 @@ def parse_colon_form(line: str):
 def parse_no_headcount_record(line: str, current_contractor: str | None):
     # Allow records without explicit headcount, e.g. 陳橋 zone 5 噴漿.
     zone, base = extract_zone(line)
+    if not zone:
+        return None
     base = clean_task(base)
     if not base:
         return None
@@ -311,6 +340,40 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
     return None
 
 
+def split_floor_task_line(line: str):
+    text = clean_task(line)
+    zone, text_no_zone = extract_zone(text)
+    text_no_zone = clean_task(text_no_zone)
+    floor = None
+    m = FLOOR_RE.search(text_no_zone)
+    if m:
+        floor = m.group(1)
+        task = clean_task((text_no_zone[:m.start()] + " " + text_no_zone[m.end():]).strip())
+    else:
+        m2 = re.match(r"^(?P<floor>(?:\d+以上樓|\d+樓[^\s]*|G/[Ff][^\s]*|M/[Ff][^\s]*|B\d+[^\s]*))(?P<task>.+)$", text_no_zone)
+        if m2:
+            floor = m2.group("floor")
+            task = clean_task(m2.group("task"))
+        else:
+            task = text_no_zone
+    return floor, zone, task
+
+
+def parse_colon_headcount_with_pending(line: str, pending_task_line: str | None):
+    if not pending_task_line:
+        return None
+    m = re.match(r"^(?P<contractor>[\u4e00-\u9fffA-Za-z0-9·•\-~  ]{2,20})[:：]\s*(?P<count>\d+)人\s*$", line)
+    if not m:
+        return None
+    contractor = normalize_contractor_name(m.group("contractor"))
+    if not is_valid_contractor(contractor):
+        return None
+    floor, zone, task = split_floor_task_line(pending_task_line)
+    if not task:
+        return None
+    return {"分判": contractor, "工序": task, "人數": m.group("count"), "分區": zone, "樓層": floor}
+
+
 def parse_segment(seg: dict):
     body = seg["body"]
     lines = [ln.strip() for ln in body.splitlines() if ln.strip() and not ln.strip().startswith(NON_WORK_PREFIXES)]
@@ -318,8 +381,25 @@ def parse_segment(seg: dict):
     rows = []
     current_contractor = None
     pending_floor = None
+    pending_task_line = None
 
     for line in lines:
+        pending_colon = parse_colon_headcount_with_pending(line, pending_task_line)
+        if pending_colon:
+            rows.append({
+                "發布用戶": seg["發布用戶"],
+                "發送時間": seg["發送時間"],
+                "日期": context["日期"] or "null",
+                "分區": pending_colon.get("分區") or context["分區"] or "null",
+                "樓棟": context["樓棟"] or "null",
+                "樓層": pending_colon.get("樓層") or context["樓層"] or "null",
+                "分判": pending_colon["分判"],
+                "工序": pending_colon["工序"],
+                "人數": pending_colon["人數"],
+            })
+            pending_task_line = None
+            continue
+
         dm = DATE_RE.search(line)
         if dm:
             context["日期"] = normalize_date(dm.group(1))
@@ -364,7 +444,7 @@ def parse_segment(seg: dict):
             current_contractor = None
             continue
 
-        if CONTRACTOR_HEADING_RE.match(line) and is_valid_contractor(line) and not ZONE_INLINE_RE.search(line) and not HEADCOUNT_RE.search(line) and not FLOOR_RE.search(line) and not DATE_RE.search(line) and not BUILDING_RE.search(line):
+        if CONTRACTOR_HEADING_RE.match(line) and looks_like_contractor_heading(line) and not HEADCOUNT_RE.search(line) and not FLOOR_RE.search(line) and not DATE_RE.search(line) and not BUILDING_RE.search(line):
             current_contractor = line.rstrip(":：").strip()
             continue
 
@@ -399,6 +479,15 @@ def parse_segment(seg: dict):
                 "工序": inline["工序"],
                 "人數": inline["人數"],
             })
+            pending_task_line = None
+        elif (
+            not HEADCOUNT_RE.search(line)
+            and not DATE_RE.search(line)
+            and not BUILDING_RE.fullmatch(line)
+            and not (BUILDING_RE.search(line) and not contains_known_task(line) and not FLOOR_RE.search(line))
+            and (contains_known_task(line) or FLOOR_RE.search(line) or re.match(r"^\d+以上樓", line) or re.match(r"^\d+樓", line) or re.match(r"^G/[Ff]", line))
+        ):
+            pending_task_line = line
 
     return rows
 
