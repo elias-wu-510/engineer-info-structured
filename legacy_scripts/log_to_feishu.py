@@ -39,6 +39,8 @@ def is_valid_contractor(value: str | None) -> bool:
     if not value:
         return False
     value = value.strip().rstrip(":：")
+    if re.match(r"^\d", value):
+        return False
     # 分判必须是中文词组；纯数字/英文/编号（如 ST01）只能作为区域/备注，不能作为分判。
     return bool(re.search(r"[\u4e00-\u9fff]", value))
 
@@ -317,7 +319,7 @@ def parse_colon_form(line: str):
     left_count = HEADCOUNT_RE.search(left)
     rest_count = HEADCOUNT_RE.search(rest)
     if left_count:
-        contractor = clean_task(left[:left_count.start()])
+        contractor = normalize_contractor_name(left[:left_count.start()])
         if not is_valid_contractor(contractor):
             return None
 
@@ -336,7 +338,7 @@ def parse_colon_form(line: str):
                 rows.append({"分判": contractor, "工序": task, "人數": count, "分區": zone})
         return rows or None
 
-    contractor = left
+    contractor = normalize_contractor_name(left)
     m = rest_count
     if not is_valid_contractor(contractor) or not m:
         return None
