@@ -11,7 +11,7 @@ from feishu_bitable_import import CSV_COLUMNS, get_tenant_access_token, upload_r
 DATE_RE = re.compile(r"(\d{4}/\d{1,2}/\d{1,2}|\d{1,2}/\d{1,2}/\d{4}|\d{1,2}/\d{1,2}/\d{2}(?:\([^)]*\))?|\d{1,2}-\d{1,2}-\d{4}|\d{1,2}月\d{1,2}日)")
 BUILDING_RE = re.compile(r"(Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+|[A-Za-z]座|[A-Za-z]棟)", re.I)
 FLOOR_RE = re.compile(r"((?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|B\d+|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
-ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+[A-Za-z]?)*|[東西南北]{1,2}面|東北面|西北面|東南面|西南面|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
+ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+[A-Za-z]?)*|[東西南北]{1,2}面|西面及北面|東面及北面|西面及南面|東面及南面|東北面|西北面|東南面|西南面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
 HEADCOUNT_RE = re.compile(r"[（(]?(\d+)人[）)]?")
 SEGMENT_HEADER_RE = re.compile(r"^\[(?P<ts>\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2})\]\s*(?P<user>.*?):\s*(?P<body>.*)$")
 SEGMENT_START_RE = re.compile(r"^\[\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2}\]\s*.*?:")
@@ -31,7 +31,7 @@ KNOWN_TASKS = [
     "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
     "洗地", "扶手電梯位砌磚", "地台轉吼", "泵水", "開料", "裝喉", "燈喉",
     "釘板", "燒焊", "上拆", "搭架", "清垃圾", "信号员", "裝套筒", "裝馬仔",
-    "紮陣鐵", "紮柱鐵", "執石矢defect", "石矢defect", "打地台碼石矢", "打石矢", "開線", "開墨", "點焊", "外牆作石矢Cut鐵", "外牆作石矢", "全層撞膠筒，撩膠杯", "全層撞膠筒", "運身橋做保護", "清石矢頭", "外牆打拆石矢", "点焊及回焊", "較碼", "较码", "全層測量", "測量", "樓窿開線", "點焊", "用蜘蛛車裝碼仔", "執九劈架位", "樓邊打地台碼石矢", "外棚清垃圾", "執石矢defect", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "開墨", "开墨", "包冷水喉", "裝消防水喉", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
+    "紮陣鐵", "紮柱鐵", "執石矢defect", "石矢defect", "打地台碼石矢", "打石矢", "開線", "開墨", "點焊", "外牆作石矢Cut鐵", "外牆作石矢", "Cut鐵", "撞膠筒，撩膠杯", "全層撞膠筒，撩膠杯", "全層撞膠筒", "運身橋做保護", "清石矢頭", "外牆打拆石矢", "打拆石矢", "点焊及回焊", "點焊及回焊", "較碼", "较码", "全層測量", "測量", "樓窿開線", "點焊", "用蜘蛛車裝碼仔", "執九劈架位", "樓邊打地台碼石矢", "外棚清垃圾", "執石矢defect", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "開墨", "开墨", "包冷水喉", "裝消防水喉", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
 ]
 
 
@@ -134,6 +134,19 @@ def clean_task(text: str) -> str:
 
 
 TASK_NORMALIZATION = [
+    ("外牆作石矢Cut鐵", "Hacking Off Concrete,Cutting & bending steel reinforcement bar"),
+    ("外牆作石矢", "Hacking Off Concrete"),
+    ("Cut鐵", "Cutting & bending steel reinforcement bar"),
+    ("撞膠筒，撩膠杯", "Site cleanliness, dust control, tidy up"),
+    ("全層撞膠筒，撩膠杯", "Site cleanliness, dust control, tidy up"),
+    ("清石矢頭", "Site cleanliness, dust control, tidy up"),
+    ("外牆打拆石矢", "Hacking Off Concrete"),
+    ("打拆石矢", "Hacking Off Concrete"),
+    ("点焊及回焊", "Welding"),
+    ("點焊及回焊", "Welding"),
+    ("较码", "Installation of steel bracket"),
+    ("較碼", "Installation of steel bracket"),
+    ("測量", "Setting out"),
     ("打地台碼石矢", "打石矢"),
     ("開線", "開墨"),
     ("点焊", "燒焊"),
@@ -515,12 +528,15 @@ def parse_segment(seg: dict):
         dm = DATE_RE.search(line)
         if dm:
             context["日期"] = normalize_date(dm.group(1))
+            current_contractor = None
 
         bm = BUILDING_RE.search(line)
         if bm:
             context["樓棟"] = normalize_building(bm.group(1))
             if "外牆" in line:
                 context["分區"] = "外牆"
+            if not HEADCOUNT_RE.search(line) and not FLOOR_RE.search(line) and line.strip() in {bm.group(1), f'{bm.group(1)}外牆'}:
+                current_contractor = None
 
         floor_only = FLOOR_RE.fullmatch(line)
         if floor_only:
