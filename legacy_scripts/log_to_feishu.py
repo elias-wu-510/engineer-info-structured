@@ -16,6 +16,7 @@ HEADCOUNT_RE = re.compile(r"[（(]?(\d+)人[）)]?")
 SEGMENT_HEADER_RE = re.compile(r"^\[(?P<ts>\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2})\]\s*(?P<user>.*?):\s*(?P<body>.*)$")
 SEGMENT_START_RE = re.compile(r"^\[\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2}\]\s*.*?:")
 NON_WORK_PREFIXES = ("收到消息", "[DEBUG", "[LOG]")
+IGNORE_TASK_HINTS = ("執狗臂架",)
 CONTRACTOR_HEADING_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z0-9·•\-~  ]{1,20}[:：]?$")
 KNOWN_CONTRACTORS = [
     "陳橋", "藝薪", "藝新", "日麗雅", "明泰", "順利", "萬通", "偉健", "利安", "秦深记", "美時",
@@ -30,7 +31,7 @@ KNOWN_TASKS = [
     "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
     "洗地", "扶手電梯位砌磚", "地台轉吼", "泵水", "開料", "裝喉", "燈喉",
     "釘板", "燒焊", "上拆", "搭架", "清垃圾", "信号员", "裝套筒", "裝馬仔",
-    "紮陣鐵", "紮柱鐵", "外牆作石矢Cut鐵", "外牆作石矢", "全層撞膠筒，撩膠杯", "全層撞膠筒", "運身橋做保護", "清石矢頭", "外牆打拆石矢", "点焊及回焊", "較碼", "较码", "全層測量", "測量", "樓窿開線", "點焊", "用蜘蛛車裝碼仔", "執九劈架位", "樓邊打地台碼石矢", "外棚清垃圾", "執石矢defect", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "開墨", "开墨", "包冷水喉", "裝消防水喉", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
+    "紮陣鐵", "紮柱鐵", "執石矢defect", "石矢defect", "打地台碼石矢", "打石矢", "開線", "開墨", "點焊", "外牆作石矢Cut鐵", "外牆作石矢", "全層撞膠筒，撩膠杯", "全層撞膠筒", "運身橋做保護", "清石矢頭", "外牆打拆石矢", "点焊及回焊", "較碼", "较码", "全層測量", "測量", "樓窿開線", "點焊", "用蜘蛛車裝碼仔", "執九劈架位", "樓邊打地台碼石矢", "外棚清垃圾", "執石矢defect", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "開墨", "开墨", "包冷水喉", "裝消防水喉", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
 ]
 
 
@@ -128,6 +129,23 @@ def normalize_date(text: str | None):
 def clean_task(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text.strip(" -—,:：.。")
+
+
+TASK_NORMALIZATION = [
+    ("打地台碼石矢", "打石矢"),
+    ("開線", "開墨"),
+    ("点焊", "燒焊"),
+    ("點焊", "燒焊"),
+    ("清垃圾", "site cleanliness"),
+    ("執石矢defect", "石矢defect"),
+]
+
+
+def normalize_task_name(task: str | None) -> str:
+    task = clean_task(task or "")
+    for src, dst in TASK_NORMALIZATION:
+        task = task.replace(src, dst)
+    return clean_task(task)
 
 
 def strip_list_marker(text: str) -> str:
@@ -469,6 +487,9 @@ def parse_segment(seg: dict):
 
     for line in lines:
         line = strip_list_marker(line)
+        if any(hint in line for hint in IGNORE_TASK_HINTS):
+            pending_task_line = None
+            continue
         pending_colon = parse_colon_headcount_with_pending(line, pending_task_line)
         if pending_colon:
             rows.append({
@@ -479,7 +500,7 @@ def parse_segment(seg: dict):
                 "樓棟": context["樓棟"] or "null",
                 "樓層": pending_colon.get("樓層") or context["樓層"] or "null",
                 "分判": pending_colon["分判"],
-                "工序": pending_colon["工序"],
+                "工序": normalize_task_name(pending_colon["工序"]),
                 "人數": pending_colon["人數"],
             })
             pending_task_line = None
@@ -559,7 +580,7 @@ def parse_segment(seg: dict):
                     "樓棟": context["樓棟"] or "null",
                     "樓層": row_floor or "null",
                     "分判": inline_row["分判"],
-                    "工序": inline_row["工序"],
+                    "工序": normalize_task_name(inline_row["工序"]),
                     "人數": inline_row["人數"],
                 })
             pending_task_line = None
