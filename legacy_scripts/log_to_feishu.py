@@ -364,7 +364,7 @@ def parse_segment(seg: dict):
             current_contractor = None
             continue
 
-        if CONTRACTOR_HEADING_RE.match(line) and is_valid_contractor(line) and not HEADCOUNT_RE.search(line) and not FLOOR_RE.search(line) and not DATE_RE.search(line) and not BUILDING_RE.search(line):
+        if CONTRACTOR_HEADING_RE.match(line) and is_valid_contractor(line) and not ZONE_INLINE_RE.search(line) and not HEADCOUNT_RE.search(line) and not FLOOR_RE.search(line) and not DATE_RE.search(line) and not BUILDING_RE.search(line):
             current_contractor = line.rstrip(":：").strip()
             continue
 
