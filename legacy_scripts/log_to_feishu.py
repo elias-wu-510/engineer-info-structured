@@ -121,6 +121,25 @@ def strip_list_marker(text: str) -> str:
     return re.sub(r"^\s*\d+[)）.]\s*", "", text).strip()
 
 
+def extract_floors(text: str) -> tuple[str | None, str]:
+    matches = list(FLOOR_RE.finditer(text))
+    if not matches:
+        return None, text
+    floors = []
+    for m in matches:
+        floor = m.group(1)
+        if floor not in floors:
+            floors.append(floor)
+    remaining_parts = []
+    last = 0
+    for m in matches:
+        remaining_parts.append(text[last:m.start()])
+        last = m.end()
+    remaining_parts.append(text[last:])
+    remaining = clean_task(" ".join(remaining_parts))
+    return "，".join(floors), remaining
+
+
 def extract_zone(text: str):
     m = ZONE_INLINE_RE.search(text)
     if not m:
@@ -356,12 +375,8 @@ def split_floor_task_line(line: str):
     text = clean_task(line)
     zone, text_no_zone = extract_zone(text)
     text_no_zone = clean_task(text_no_zone)
-    floor = None
-    m = FLOOR_RE.search(text_no_zone)
-    if m:
-        floor = m.group(1)
-        task = clean_task((text_no_zone[:m.start()] + " " + text_no_zone[m.end():]).strip())
-    else:
+    floor, task = extract_floors(text_no_zone)
+    if not floor:
         m2 = re.match(r"^(?P<floor>(?:\d+以上樓|\d+樓[^\s]*|G/[Ff][^\s]*|M/[Ff][^\s]*|B\d+[^\s]*))(?P<task>.+)$", text_no_zone)
         if m2:
             floor = m2.group("floor")
@@ -463,19 +478,13 @@ def parse_segment(seg: dict):
             current_contractor = line.rstrip(":：").strip()
             continue
 
-        embedded_floor = FLOOR_RE.search(line)
-        if not embedded_floor and HEADCOUNT_RE.search(line):
-            fallback_floor = re.search(r"([A-Za-z]+/[Ff]至(?:\d+|[A-Za-z]+)/(?:[Ff]))", line)
-            if not fallback_floor:
-                fallback_floor = re.search(r"((?:\d+|[A-Za-z]+)/[Ff]至(?:\d+|[A-Za-z]+)/[Ff])", line)
-            if fallback_floor:
-                embedded_floor = fallback_floor
         line_for_record = line
         row_floor = context["樓層"]
-        if embedded_floor and HEADCOUNT_RE.search(line):
-            row_floor = embedded_floor.group(1)
+        embedded_floors, line_without_floors = extract_floors(line)
+        if embedded_floors and HEADCOUNT_RE.search(line):
+            row_floor = embedded_floors
             pending_floor = row_floor
-            line_for_record = clean_task((line[:embedded_floor.start()] + " " + line[embedded_floor.end():]).strip())
+            line_for_record = line_without_floors
         elif HEADCOUNT_RE.search(line) and pending_floor:
             row_floor = pending_floor
 
