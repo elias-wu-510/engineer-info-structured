@@ -11,7 +11,7 @@ from feishu_bitable_import import CSV_COLUMNS, get_tenant_access_token, upload_r
 DATE_RE = re.compile(r"(\d{4}[/-]\d{1,2}[/-]\d{1,2}(?:\s*星期[一二三四五六日天])?|(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}/\d{1,2})(?:[（(][^）)]*[）)])?|\d{1,2}月\d{1,2}日)")
 BUILDING_RE = re.compile(r"(Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+|[A-Za-z]座|[A-Za-z]棟)", re.I)
 FLOOR_RE = re.compile(r"((?:\d+~\d+/[Ff]|\d+(?:,\d+)+/[Ff]|\d+[Ff])|(?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
-ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+(?:[-‑–—]\d+)?[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+(?:[-‑–—]\d+)?[A-Za-z]?)*|[東西南北]{1,2}面\s+[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}|[東西南北]{1,2}面\s+[A-Z]\d{1,2}|西面及北面|東面及北面|西面及南面|東面及南面|東北面|西北面|東南面|西南面|[東西南北]{1,2}面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}(?:\s*~\s*[A-Z]{1,2})?|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
+ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+(?:[-‑–—]\d+)?[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+(?:[-‑–—]\d+)?[A-Za-z]?)*|[東西南北]{1,2}面\s+[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}|[東西南北]{1,2}面\s+[A-Z]\d{1,2}|西面及北面|東面及北面|西面及南面|東面及南面|東北面|西北面|東南面|西南面|[東西南北]{1,2}面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}(?:\s*~\s*[A-Z]{1,2})?|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Za-z]牛房|[A-Z]區|全場|lift機房)")
 HEADCOUNT_RE = re.compile(r"[（(]?(\d+)人[）)]?")
 SEGMENT_HEADER_RE = re.compile(r"^\[(?P<ts>\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2})\]\s*(?P<user>.*?):\s*(?P<body>.*)$")
 SEGMENT_START_RE = re.compile(r"^\[\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2}\]\s*.*?:")
@@ -31,7 +31,7 @@ KNOWN_TASKS = [
     "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
     "洗地", "扶手電梯位砌磚", "地台轉吼", "泵水", "開料", "裝喉", "燈喉",
     "釘板", "燒焊", "上拆", "搭架", "清垃圾", "信号员", "裝套筒", "裝馬仔",
-    "紮陣鐵", "紮柱鐵", "執石矢defect", "石矢defect", "打地台碼石矢", "打石矢", "開線", "開墨", "點焊", "外牆作石矢Cut鐵", "外牆作石矢", "Cut鐵", "撞膠筒，撩膠杯", "全層撞膠筒，撩膠杯", "全層撞膠筒", "運身橋做保護", "清石矢頭", "外牆打拆石矢", "打拆石矢", "点焊及回焊", "點焊及回焊", "裝碼", "較碼", "较码", "全層測量", "測量", "樓窿開線", "點焊", "用蜘蛛車裝碼仔", "執九劈架位", "樓邊打地台碼石矢", "外棚清垃圾", "執石矢defect", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "開墨", "开墨", "包冷水喉", "裝消防水喉", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
+    "紮陣鐵", "紮柱鐵", "執石矢defect", "石矢defect", "打地台碼石矢", "打石矢", "開線", "開墨", "點焊", "外牆作石矢Cut鐵", "外牆作石矢", "Cut鐵", "撞膠筒，撩膠杯", "全層撞膠筒，撩膠杯", "全層撞膠筒", "運身橋做保護", "清石矢頭", "外牆打拆石矢", "打拆石矢", "点焊及回焊", "點焊及回焊", "打碼", "放線", "裝碼", "較碼", "较码", "全層測量", "測量", "樓窿開線", "點焊", "用蜘蛛車裝碼仔", "執九劈架位", "樓邊打地台碼石矢", "外棚清垃圾", "執石矢defect", "cut鐵&種鐵", "封板&頂底槽", "天花裝風喉", "噴漿", "种鐵", "種鐵", "cut鐵", "封板", "頂底槽", "開墨", "开墨", "包冷水喉", "裝消防水喉", "冷水喉燒焊", "冷水喉烧焊", "冷水喉", "冷氣", "消防", "電燈",
 ]
 
 
@@ -189,13 +189,19 @@ def strip_list_marker(text: str) -> str:
     return re.sub(r"^\s*\d+[)）.]\s*", "", text).strip()
 
 
+def normalize_floor_value(value: str) -> str:
+    if re.fullmatch(r'[Mm][摟樓]', value or ''):
+        return 'M/F'
+    return value
+
+
 def extract_floors(text: str) -> tuple[str | None, str]:
     matches = list(FLOOR_RE.finditer(text))
     if not matches:
         return None, text
     floors = []
     for m in matches:
-        floor = m.group(1)
+        floor = normalize_floor_value(m.group(1))
         if floor not in floors:
             floors.append(floor)
     remaining_parts = []
@@ -493,6 +499,16 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
     before = clean_task(line[:m.start()])
     after = clean_task(line[m.end():])
 
+    total_then_detail = re.match(r'^(?P<contractor>[\u4e00-\u9fff]{2,8})$', before)
+    detail = re.match(r'^(?P<count>\d+)人(?P<rest>.+)$', after)
+    if total_then_detail and detail:
+        contractor = normalize_contractor_name(total_then_detail.group('contractor'))
+        if is_valid_contractor(contractor):
+            zone_detail, task_detail = extract_zone(detail.group('rest'))
+            task_detail = final_clean_task(task_detail)
+            if task_detail:
+                return {"分判": contractor, "工序": task_detail, "人數": detail.group('count'), "分區": zone_detail}
+
     if not current_contractor and before:
         zone_before_early, before_no_zone_early = extract_zone(before)
         task_contractor_early, task_text_early = split_by_known_task(before_no_zone_early)
@@ -640,14 +656,14 @@ def parse_segment(seg: dict):
 
         floor_only = FLOOR_RE.fullmatch(line)
         if floor_only:
-            context["樓層"] = floor_only.group(1)
+            context["樓層"] = normalize_floor_value(floor_only.group(1))
             pending_floor = context["樓層"]
             continue
 
         building_floor = re.match(r"^(?P<building>[A-Za-z]座|Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+)\s+(?P<floor>(?:\d+|[A-Za-z]+)/[Ff])$", line, re.I)
         if building_floor:
             context["樓棟"] = normalize_building(building_floor.group("building"))
-            context["樓層"] = building_floor.group("floor")
+            context["樓層"] = normalize_floor_value(building_floor.group("floor"))
             current_contractor = None
             continue
 
@@ -660,7 +676,7 @@ def parse_segment(seg: dict):
         if compact_heading:
             context["日期"] = normalize_date(compact_heading.group("date"))
             context["樓棟"] = normalize_building(compact_heading.group("building"))
-            context["樓層"] = compact_heading.group("floor")
+            context["樓層"] = normalize_floor_value(compact_heading.group("floor"))
             current_contractor = None
             continue
 
@@ -694,6 +710,8 @@ def parse_segment(seg: dict):
         if inline:
             inline_rows = inline if isinstance(inline, list) else [inline]
             for inline_row in inline_rows:
+                if is_valid_contractor(inline_row.get("分判")):
+                    current_contractor = inline_row.get("分判")
                 rows.append({
                     "發布用戶": seg["發布用戶"],
                     "發送時間": seg["發送時間"],
