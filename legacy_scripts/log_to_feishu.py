@@ -24,6 +24,14 @@ KNOWN_CONTRACTORS = [
 ]
 
 
+def is_valid_contractor(value: str | None) -> bool:
+    if not value:
+        return False
+    value = value.strip().rstrip(":：")
+    # 分判必须是中文词组；纯数字/英文/编号（如 ST01）只能作为区域/备注，不能作为分判。
+    return bool(re.search(r"[\u4e00-\u9fff]", value))
+
+
 def split_segments(text: str, group_sender: str = "null", group_sent_time: str = "null"):
     lines = text.splitlines()
     current = []
@@ -111,10 +119,10 @@ def parse_compact_no_space(before: str, current_contractor: str | None):
     contractor = current_contractor
     task = None
 
-    if current_contractor and base.startswith(current_contractor):
+    if current_contractor and is_valid_contractor(current_contractor) and base.startswith(current_contractor):
         contractor = current_contractor
         task = clean_task(base[len(current_contractor):])
-    elif current_contractor:
+    elif current_contractor and is_valid_contractor(current_contractor):
         contractor = current_contractor
         task = clean_task(base)
     else:
@@ -128,7 +136,7 @@ def parse_compact_no_space(before: str, current_contractor: str | None):
                 contractor = m.group("contractor")
                 task = clean_task(m.group("task"))
 
-    if contractor and task:
+    if contractor and is_valid_contractor(contractor) and task:
         return contractor, task, zone
     return None, None, zone
 
@@ -148,7 +156,7 @@ def parse_colon_form(line: str):
     rest_count = HEADCOUNT_RE.search(rest)
     if left_count:
         contractor = clean_task(left[:left_count.start()])
-        if not contractor:
+        if not is_valid_contractor(contractor):
             return None
         if rest_count:
             count = rest_count.group(1)
@@ -164,7 +172,7 @@ def parse_colon_form(line: str):
 
     contractor = left
     m = rest_count
-    if not contractor or not m:
+    if not is_valid_contractor(contractor) or not m:
         return None
     count = m.group(1)
     before = clean_task(rest[:m.start()])
@@ -204,13 +212,13 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
             if task:
                 return {"分判": known_contractor, "工序": task, "人數": count, "分區": zone_after or zone_before}
 
-    if current_contractor and not before:
+    if current_contractor and is_valid_contractor(current_contractor) and not before:
         zone, task = extract_zone(after)
         task = clean_task(task)
         if task:
             return {"分判": current_contractor, "工序": task, "人數": count, "分區": zone}
 
-    if current_contractor and before:
+    if current_contractor and is_valid_contractor(current_contractor) and before:
         zone, task = extract_zone(before)
         task = clean_task(task)
         after_task = clean_task(after)
@@ -226,7 +234,7 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
     zone, remaining = extract_zone(before)
     after_task = clean_task(after)
     if zone and after_task:
-        return {"分判": current_contractor or "null", "工序": after_task, "人數": count, "分區": zone}
+        return {"分判": current_contractor if is_valid_contractor(current_contractor) else "null", "工序": after_task, "人數": count, "分區": zone}
 
     return None
 
@@ -279,7 +287,12 @@ def parse_segment(seg: dict):
             if pending_match:
                 pending_floor = pending_match.group(1)
 
-        if CONTRACTOR_HEADING_RE.match(line) and not HEADCOUNT_RE.search(line) and not FLOOR_RE.search(line) and not DATE_RE.search(line) and not BUILDING_RE.search(line):
+        if CONTRACTOR_HEADING_RE.match(line) and not is_valid_contractor(line) and not HEADCOUNT_RE.search(line) and not FLOOR_RE.search(line) and not DATE_RE.search(line) and not BUILDING_RE.search(line):
+            context["分區"] = normalize_zone(line)
+            current_contractor = None
+            continue
+
+        if CONTRACTOR_HEADING_RE.match(line) and is_valid_contractor(line) and not HEADCOUNT_RE.search(line) and not FLOOR_RE.search(line) and not DATE_RE.search(line) and not BUILDING_RE.search(line):
             current_contractor = line.rstrip(":：").strip()
             continue
 
