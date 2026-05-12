@@ -177,6 +177,7 @@ def normalize_task_name(task: str | None) -> str:
 
 def final_clean_task(task: str | None, building: str | None = None) -> str:
     task = normalize_task_name(task)
+    task = re.sub(r"^人\s*", "", task)
     if building:
         task = task.replace(building, "")
     task = re.sub(r"^[A-Z]座", "", task)
@@ -446,6 +447,8 @@ def parse_multi_headcount_inline(line: str, current_contractor: str | None):
 
     first = matches[0]
     prefix = clean_task(line[:first.start()])
+    if re.fullmatch(r"[\u4e00-\u9fff]{2,8}", prefix) and len(matches) >= 2:
+        return None
     zone, prefix_no_zone = extract_zone(prefix)
     contractor = None
     first_task = None
