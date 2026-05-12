@@ -10,7 +10,7 @@ from feishu_bitable_import import CSV_COLUMNS, get_tenant_access_token, upload_r
 
 DATE_RE = re.compile(r"(\d{4}[/-]\d{1,2}[/-]\d{1,2}(?:\s*星期[一二三四五六日天])?|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?(?:[（(][^）)]*[）)])?|\d{1,2}月\d{1,2}日)")
 BUILDING_RE = re.compile(r"(Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+|[A-Za-z]座|[A-Za-z]棟)", re.I)
-FLOOR_RE = re.compile(r"((?:\d+~\d+/[Ff]|\d+(?:,\d+)+/[Ff])|(?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
+FLOOR_RE = re.compile(r"((?:\d+~\d+/[Ff]|\d+(?:,\d+)+/[Ff]|\d+[Ff])|(?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
 ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+[A-Za-z]?)*|[東西南北]{1,2}面\s+[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}|[東西南北]{1,2}面\s+[A-Z]\d{1,2}|西面及北面|東面及北面|西面及南面|東面及南面|東北面|西北面|東南面|西南面|[東西南北]{1,2}面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
 HEADCOUNT_RE = re.compile(r"[（(]?(\d+)人[）)]?")
 SEGMENT_HEADER_RE = re.compile(r"^\[(?P<ts>\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2})\]\s*(?P<user>.*?):\s*(?P<body>.*)$")
@@ -508,6 +508,14 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
             return {"分判": current_contractor, "工序": after_task, "人數": count, "分區": zone}
         if task:
             return {"分判": current_contractor, "工序": task, "人數": count, "分區": zone}
+
+    zone_before, before_no_zone = extract_zone(before)
+    task_contractor, task_text = split_by_known_task(before_no_zone)
+    if task_contractor and task_text:
+        after_task = normalize_task_name(after)
+        task = normalize_task_name((task_text + " " + after_task).strip())
+        if task:
+            return {"分判": task_contractor, "工序": task, "人數": count, "分區": zone_before}
 
     contractor, task, zone = parse_compact_no_space(before, current_contractor)
     if contractor and task:
