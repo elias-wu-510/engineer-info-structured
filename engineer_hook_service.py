@@ -168,6 +168,7 @@ def parse_requested_summary_date(text: str | None) -> str | None:
     patterns = [
         r'(20\d{2})[/-](\d{1,2})[/-](\d{1,2})',
         r'(\d{1,2})[/-](\d{1,2})[/-](20\d{2})',
+        r'(\d{1,2})[/-](\d{1,2})(?![/-]\d)',
         r'(\d{1,2})月(\d{1,2})日',
     ]
     m = re.search(patterns[0], text)
@@ -179,6 +180,10 @@ def parse_requested_summary_date(text: str | None) -> str | None:
         d, mo, y = m.groups()
         return f'{int(d):02d}/{int(mo):02d}/{y}'
     m = re.search(patterns[2], text)
+    if m:
+        d, mo = m.groups()
+        return f'{int(d):02d}/{int(mo):02d}/2026'
+    m = re.search(patterns[3], text)
     if m:
         mo, d = m.groups()
         return f'{int(d):02d}/{int(mo):02d}/2026'

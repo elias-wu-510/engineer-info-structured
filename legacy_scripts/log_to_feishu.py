@@ -8,7 +8,7 @@ from pathlib import Path
 from extract_engineering_messages import extract_messages, looks_like_engineering_message
 from feishu_bitable_import import CSV_COLUMNS, get_tenant_access_token, upload_records, parse_csv_text
 
-DATE_RE = re.compile(r"(\d{4}/\d{1,2}/\d{1,2}|\d{1,2}/\d{1,2}/\d{4}|\d{1,2}/\d{1,2}/\d{2}(?:\([^)]*\))?|\d{1,2}-\d{1,2}-\d{4}|\d{1,2}月\d{1,2}日)")
+DATE_RE = re.compile(r"(\d{4}[/-]\d{1,2}[/-]\d{1,2}(?:\s*星期[一二三四五六日天])?|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?(?:[（(][^）)]*[）)])?|\d{1,2}月\d{1,2}日)")
 BUILDING_RE = re.compile(r"(Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+|[A-Za-z]座|[A-Za-z]棟)", re.I)
 FLOOR_RE = re.compile(r"((?:\d+~\d+/[Ff]|\d+(?:,\d+)+/[Ff])|(?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
 ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+[A-Za-z]?)*|[東西南北]{1,2}面\s+[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}|[東西南北]{1,2}面\s+[A-Z]\d{1,2}|西面及北面|東面及北面|西面及南面|東面及南面|東北面|西北面|東南面|西南面|[東西南北]{1,2}面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Z]區|全場|lift機房)")
@@ -105,26 +105,33 @@ def normalize_date(text: str | None):
     if not text:
         return None
     text = text.strip()
-    m = re.fullmatch(r"(\d{4})/(\d{1,2})/(\d{1,2})", text)
+    text = re.sub(r"\s*星期[一二三四五六日天]$", "", text)
+    text = re.sub(r"[（(][^）)]*[）)]$", "", text)
+    text = text.strip()
+
+    m = re.fullmatch(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", text)
     if m:
         y, mo, d = m.groups()
-        return f"{int(d)}/{int(mo)}/{y}"
-    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", text)
+        return f"{int(d):02d}/{int(mo):02d}/{int(y):04d}"
+
+    m = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", text)
     if m:
         d, mo, y = m.groups()
-        return f"{int(d)}/{int(mo)}/{y}"
-    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{2})(?:\([^)]*\))?", text)
+        y = int(y)
+        if y < 100:
+            y += 2000
+        return f"{int(d):02d}/{int(mo):02d}/{y:04d}"
+
+    m = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})", text)
     if m:
-        d, mo, y = m.groups()
-        return f"{int(d)}/{int(mo)}/20{int(y):02d}"
-    m = re.fullmatch(r"(\d{1,2})-(\d{1,2})-(\d{4})", text)
-    if m:
-        d, mo, y = m.groups()
-        return f"{int(d)}/{int(mo)}/{y}"
+        d, mo = m.groups()
+        return f"{int(d):02d}/{int(mo):02d}/2026"
+
     m = re.fullmatch(r"(\d{1,2})月(\d{1,2})日", text)
     if m:
         mo, d = m.groups()
-        return f"{int(d)}/{int(mo)}/2026"
+        return f"{int(d):02d}/{int(mo):02d}/2026"
+
     return text
 
 
