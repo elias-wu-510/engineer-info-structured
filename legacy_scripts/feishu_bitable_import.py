@@ -4,6 +4,7 @@ import io
 import json
 import os
 import sys
+import time
 import urllib.request
 
 AUTH_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
@@ -110,10 +111,18 @@ def batch_create_records(records: list[dict], token: str) -> list[str]:
     table_id = os.environ["FEISHU_BITABLE_TABLE_ID"]
     url = BATCH_CREATE_URL.format(app_token=app_token, table_id=table_id)
     headers = {"Authorization": f"Bearer {token}"}
-    payload = {"records": [{"fields": {PRIMARY_FIELD: r[PRIMARY_FIELD]}} for r in records]}
+    # Create records with full fields in one batch. Older implementation created
+    # only the primary field, then issued one PUT per row; that was slow and could
+    # block the hook for minutes when Feishu was slow.
+    payload = {"records": [{"fields": r} for r in records]}
+    start = time.monotonic()
+    print(f"Feishu batch_create start rows={len(records)}", flush=True)
     result = request_json(url, payload, headers=headers)
+    elapsed = time.monotonic() - start
+    print(f"Feishu batch_create done rows={len(records)} elapsed={elapsed:.2f}s code={result.get('code')}", flush=True)
     if result.get("code") != 0:
         # fallback to single-create path if batch create is not accepted for this table
+        print(f"Feishu batch_create failed, falling back to per-record create/update: {result}", file=sys.stderr, flush=True)
         return [create_record(r, token) for r in records]
     items = result.get("data", {}).get("records", [])
     record_ids = [item.get("record_id") or item.get("id") for item in items]
@@ -137,11 +146,18 @@ def update_record(record_id: str, fields: dict, token: str):
 
 def upload_records(records: list[dict], token: str):
     created = 0
-    for chunk in batch_chunks(records, BATCH_SIZE):
+    total = len(records)
+    print(f"Feishu upload start total={total}", flush=True)
+    for chunk_index, chunk in enumerate(batch_chunks(records, BATCH_SIZE), start=1):
+        chunk_start = time.monotonic()
         record_ids = batch_create_records(chunk, token)
-        for record_id, record in zip(record_ids, chunk):
-            update_record(record_id, record, token)
-            created += 1
+        created += len(record_ids)
+        print(
+            f"Feishu upload chunk={chunk_index} created={len(record_ids)} "
+            f"elapsed={time.monotonic() - chunk_start:.2f}s progress={created}/{total}",
+            flush=True,
+        )
+    print(f"Feishu upload done total={created}", flush=True)
     return created
 
 
@@ -164,7 +180,10 @@ def main():
     if not records:
         fail("No valid rows found in CSV")
 
+    token_start = time.monotonic()
+    print("Feishu token start", flush=True)
     token = get_tenant_access_token()
+    print(f"Feishu token done elapsed={time.monotonic() - token_start:.2f}s", flush=True)
     created = upload_records(records, token)
     print(f"Imported {created} records to Feishu Bitable")
 

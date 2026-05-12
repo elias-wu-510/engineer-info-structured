@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -103,23 +104,31 @@ def contains_summary_trigger(text: str) -> bool:
 
 
 def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, dry_run=False):
+    import_start = time.monotonic()
     import_state = load_import_state(import_state_file)
     policy = load_policy(policy_file)
     start_time = parse_start_time(import_state.get('startTime'))
     rows = parse_rows_from_log(log_file, start_time=start_time, policy=policy)
     imported = set(import_state.get('imported', []))
     new_rows = [row for row in rows if row_fingerprint(row) not in imported]
+    print(f'Feishu import parsed rows={len(rows)} new_rows={len(new_rows)} elapsed={time.monotonic() - import_start:.2f}s', flush=True)
     if not new_rows:
         return 0, rows, []
     if not dry_run:
         csv_text = rows_to_csv(new_rows)
-        token = get_tenant_access_token()
         records = parse_csv_text(csv_text)
+        token_start = time.monotonic()
+        print('Feishu token start', flush=True)
+        token = get_tenant_access_token()
+        print(f'Feishu token done elapsed={time.monotonic() - token_start:.2f}s', flush=True)
+        upload_start = time.monotonic()
         created = upload_records(records, token)
+        print(f'Feishu upload_records done created={created} elapsed={time.monotonic() - upload_start:.2f}s', flush=True)
         imported.update(row_fingerprint(r) for r in new_rows)
         import_state['imported'] = sorted(imported)
         import_state['lastLog'] = log_file.name
         save_import_state(import_state_file, import_state)
+        print(f'Feishu import done total_elapsed={time.monotonic() - import_start:.2f}s', flush=True)
         return created, rows, new_rows
     return len(new_rows), rows, new_rows
 
@@ -211,6 +220,17 @@ def parse_rows_for_summary(log_file: Path, import_state_file: Path, policy_file:
     return parse_rows_from_log(log_file, start_time=start_time, policy=policy)
 
 
+def feishu_import_worker(log_file: Path, args):
+    try:
+        print(f'Feishu import worker start for {log_file.name}', flush=True)
+        created, rows, new_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run)
+        if created:
+            print(f'Imported {created} new rows from {log_file.name}', flush=True)
+        print(f'Feishu import worker done for {log_file.name}', flush=True)
+    except Exception as e:
+        print(f'ERROR: Feishu import worker failed for {log_file.name}: {e}', file=sys.stderr, flush=True)
+
+
 def run_once(args, service_state: dict):
     log_file = latest_log_or_none(Path(args.log_dir))
     if not log_file:
@@ -231,10 +251,20 @@ def run_once(args, service_state: dict):
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent WhatsApp summary to {args.target_group}', flush=True)
 
-    print(f'Checking Feishu import for {log_file.name}', flush=True)
-    created, rows, new_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run)
-    if created:
-        print(f'Imported {created} new rows from {log_file.name}', flush=True)
+    if new_text and not service_state.get('feishu_import_running'):
+        print(f'Scheduling Feishu import for {log_file.name}', flush=True)
+        service_state['feishu_import_running'] = True
+        service_state['feishu_import_log'] = str(log_file)
+        worker_args = args
+        def _run_worker():
+            try:
+                feishu_import_worker(log_file, worker_args)
+            finally:
+                service_state['feishu_import_running'] = False
+                service_state.pop('feishu_import_log', None)
+        threading.Thread(target=_run_worker, name='feishu-import-worker', daemon=True).start()
+    elif new_text:
+        print(f'Feishu import already running for {service_state.get("feishu_import_log")}', flush=True)
     return service_state
 
 
@@ -269,7 +299,11 @@ def main():
     while True:
         try:
             state = run_once(args, state)
-            save_json(state_path, state)
+            persisted_state = dict(state)
+            # Runtime thread flags are process-local; do not persist them across restarts.
+            persisted_state.pop('feishu_import_running', None)
+            persisted_state.pop('feishu_import_log', None)
+            save_json(state_path, persisted_state)
         except Exception as e:
             print(f'ERROR: {e}', file=sys.stderr, flush=True)
         if args.once:
