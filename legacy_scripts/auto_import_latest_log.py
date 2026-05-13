@@ -97,17 +97,30 @@ def parse_start_time(value: str | None):
 
 
 
-def merge_same_work_rows(rows: list[dict]) -> list[dict]:
-    """Merge rows that only differ by floor for the same source/work/headcount.
+def _join_unique_values(*values: str) -> str:
+    result = []
+    for value in values:
+        for part in str(value or 'null').replace('，', ',').replace(' / ', ',').split(','):
+            part = part.strip()
+            if not part or part == 'null':
+                continue
+            if part not in result:
+                result.append(part)
+    return '，'.join(result) if result else 'null'
 
-    If one message says the same contractor/task/headcount across multiple floors,
-    keep one row and join the floors instead of repeating the same headcount per floor.
+
+def merge_same_work_rows(rows: list[dict]) -> list[dict]:
+    """Merge rows for the same work crew/task/headcount in the same source.
+
+    Same contractor + task + headcount may be reported across multiple floors and
+    zones in one sentence, e.g. "15/F至18/F zoneA，M/F zoneB 較碼9人".
+    Keep one row and join both 樓層 and 分區 so the 9 people are not counted twice.
     """
     merged = []
     by_key = {}
     for row in rows:
         key = tuple((row.get(k) or 'null') for k in [
-            '發布用戶', '發送時間', '日期', '分區', '樓棟', '分判', '工序', '人數', '原始消息'
+            '發布用戶', '發送時間', '日期', '樓棟', '分判', '工序', '人數', '原始消息'
         ])
         if key not in by_key:
             item = dict(row)
@@ -115,12 +128,8 @@ def merge_same_work_rows(rows: list[dict]) -> list[dict]:
             merged.append(item)
             continue
         item = by_key[key]
-        existing = [x.strip() for x in str(item.get('樓層') or 'null').replace('，', ',').split(',') if x.strip() and x.strip() != 'null']
-        incoming = [x.strip() for x in str(row.get('樓層') or 'null').replace('，', ',').split(',') if x.strip() and x.strip() != 'null']
-        for floor in incoming:
-            if floor not in existing:
-                existing.append(floor)
-        item['樓層'] = '，'.join(existing) if existing else 'null'
+        item['樓層'] = _join_unique_values(item.get('樓層'), row.get('樓層'))
+        item['分區'] = _join_unique_values(item.get('分區'), row.get('分區'))
     return merged
 
 def parse_rows_from_log(log_file: Path, start_time=None, policy=None) -> list[dict]:
