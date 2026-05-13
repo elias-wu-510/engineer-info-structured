@@ -10,7 +10,7 @@ from pathlib import Path
 from log_to_feishu import split_segments, parse_segment, rows_to_csv
 from extract_engineering_messages import extract_messages, looks_like_engineering_message
 from feishu_bitable_import import get_tenant_access_token, parse_csv_text, upload_records, CSV_COLUMNS
-from llm_fallback_parser import parse_message as parse_message_with_llm, enabled as llm_enabled
+from llm_fallback_parser import parse_message as parse_message_with_llm, enabled as llm_enabled, mode as llm_mode
 
 DEFAULT_LOG_DIR = Path(os.environ.get('ENGINEER_LOG_DIR', './logs'))
 DEFAULT_STATE = Path(os.environ.get('ENGINEER_IMPORT_STATE_FILE', '.state/feishu-import-state.json'))
@@ -122,17 +122,22 @@ def parse_rows_from_log(log_file: Path, start_time=None, policy=None) -> list[di
         message_rows = []
         for seg in split_segments(parse_text, sender_label or msg.get('sender', 'null'), msg.get('log_ts', 'null')):
             message_rows.extend(parse_segment(seg))
-        if not message_rows and policy.get('llmFallback', True) and llm_enabled():
+        if policy.get('llmFallback', True) and llm_enabled():
             try:
-                message_rows = parse_message_with_llm(
-                    msg.get('text', ''),
-                    sender_label or msg.get('sender', 'null'),
-                    msg.get('log_ts', 'null'),
-                )
-                if message_rows:
-                    print(f'LLM fallback parsed {len(message_rows)} rows for {msg.get("log_ts")}', flush=True)
+                use_llm = (not message_rows) or llm_mode() in ('review', 'always', 'correct', 'validate')
+                if use_llm:
+                    llm_rows = parse_message_with_llm(
+                        msg.get('text', ''),
+                        sender_label or msg.get('sender', 'null'),
+                        msg.get('log_ts', 'null'),
+                        message_rows,
+                    )
+                    if llm_rows:
+                        mode_label = 'review' if message_rows else 'fallback'
+                        print(f'LLM {mode_label} parsed {len(llm_rows)} rows for {msg.get("log_ts")}', flush=True)
+                        message_rows = llm_rows
             except Exception as exc:
-                print(f'WARN: LLM fallback failed for {msg.get("log_ts")}: {exc}', flush=True)
+                print(f'WARN: LLM parse failed for {msg.get("log_ts")}: {exc}', flush=True)
         for row in message_rows:
             fp = row_fingerprint(row)
             if fp in seen:

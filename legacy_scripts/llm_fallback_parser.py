@@ -7,22 +7,31 @@ import urllib.request
 from feishu_bitable_import import CSV_COLUMNS
 
 SYSTEM_PROMPT = """你是工程施工報工信息結構化助手。
-當規則解析器無法解析消息時，你只輸出 CSV，不要解釋。
+你只輸出 CSV，不要解釋。
 CSV 表頭必須嚴格為：發布用戶,發送時間,日期,分區,樓棟,樓層,分判,工序,人數,原始消息
 如果沒有有效工程記錄，輸出 exactly: 无有效记录
 規則：
 - 日期統一 DD/MM/YYYY；如果只有日/月，默認年份 2026。
 - 樓棟統一 A座/B座/C座。
+- 樓層保留原工程樓層，如 1F、1/F、G/F、M/F；多樓層可用中文逗號連接。
+- 分區包括 zone、ST、CP、方向、外牆、grid/range 等，例如 CP7-8 必須放入分區，不要放入分判。
+- 分判必須是中文公司/隊伍名，例如 新豪、鉅城、駿慶、永興、偉健、順利、康和等；不要把 zone、樓層、ST01、CP7-8、B5 等當分判。
+- 工序是實際工作內容，例如 打石矢、core 窿、維修臨時lift膽門、燒焊。
 - 人數只輸出數字；缺失用 null。
 - 缺失字段用 null。
 - 原始消息填入完整原文。
-- 分判必須是中文公司/隊伍名，不要把 zone、樓層、ST01、B5 等當分判。
-- 一條消息中多個分判/工序/人數要拆成多行。
+- 一條消息中多個樓層/分判/工序/人數要拆成多行。
+- 如果提供了規則解析結果，只把它當參考；必須以原始消息為準修正錯亂字段。
 """
 
 
 def enabled() -> bool:
     return bool(os.getenv("LLM_API_BASE_URL") and os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL"))
+
+
+def mode() -> str:
+    # fallback: only when rules return no rows; review: always review/correct rule rows.
+    return (os.getenv("LLM_MODE") or os.getenv("LLM_PARSE_MODE") or "fallback").strip().lower()
 
 
 def _request_llm(prompt: str) -> str:
@@ -80,14 +89,29 @@ def parse_csv_output(text: str) -> list[dict]:
     return rows
 
 
-def parse_message(text: str, sender: str, sent_time: str) -> list[dict]:
+def rows_to_csv_for_prompt(rows: list[dict]) -> str:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=CSV_COLUMNS)
+    writer.writeheader()
+    for row in rows or []:
+        writer.writerow({k: row.get(k, "null") for k in CSV_COLUMNS})
+    return buf.getvalue().strip()
+
+
+def parse_message(text: str, sender: str, sent_time: str, rule_rows: list[dict] | None = None) -> list[dict]:
     if not enabled():
         return []
+    rule_csv = rows_to_csv_for_prompt(rule_rows or []) if rule_rows else "无"
     prompt = f"""請將以下 WhatsApp 工程報工消息結構化為 CSV。
 發布用戶：{sender}
 發送時間：{sent_time}
+
 原始消息：
 {text}
-"""
+
+規則解析結果（可能有錯，只作參考）：
+{rule_csv}
+
+請輸出修正後的最終 CSV。"""
     output = _request_llm(prompt)
     return parse_csv_output(output)
