@@ -11,7 +11,7 @@ from feishu_bitable_import import CSV_COLUMNS, get_tenant_access_token, upload_r
 DATE_RE = re.compile(r"(\d{4}[/-]\d{1,2}[/-]\d{1,2}(?:\s*星期[一二三四五六日天])?|(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}/\d{1,2})(?:[（(][^）)]*[）)])?|\d{1,2}月\d{1,2}日)")
 BUILDING_RE = re.compile(r"(Block\s*[A-Za-z]+|Blk\s*[A-Za-z]+|[A-Za-z]座|[A-Za-z]棟)", re.I)
 FLOOR_RE = re.compile(r"((?:\d+~\d+/[Ff]|\d+(?:,\d+)+/[Ff]|\d+[Ff])|(?:(?:\d+|[A-Za-z]+|MR|UP)/[Ff])(?:至(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?(?:及(?:\d+|[A-Za-z]+|MR|UP)/[Ff])?|\d+樓|[A-Za-z]摟|[A-Za-z]樓|M/[Ff]|m/[Ff]|MR/[Ff]|UP/[Ff])")
-ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+(?:[-‑–—]\d+)?[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+(?:[-‑–—]\d+)?[A-Za-z]?)*|[東西南北]{1,2}面\s+[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}|[東西南北]{1,2}面\s+[A-Z]\d{1,2}|西面及北面|東面及北面|西面及南面|東面及南面|東北面|西北面|東南面|西南面|[東西南北]{1,2}面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}(?:\s*~\s*[A-Z]{1,2})?|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Za-z]牛房|[A-Z]區|全場|lift機房)")
+ZONE_INLINE_RE = re.compile(r"([Zz]one\s*\d+(?:[-‑–—]\d+)?[A-Za-z]?(?:\s*(?:&|＆|/|、|,|，)\s*(?:[Zz]one\s*)?\d+(?:[-‑–—]\d+)?[A-Za-z]?)*|[東西南北]{1,2}面\s+[A-Z]{2}\d+[-‑–—]\d+|[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}|[東西南北]{1,2}面\s+[A-Z]\d{1,2}|西面及北面|東面及北面|西面及南面|東面及南面|東北面|西北面|東南面|西南面|[東西南北]{1,2}面|近[A-Z0-9]+至[A-Z0-9]+向(?:siteB|B座)|[A-Z][0-9]+至[A-Z][0-9]+向siteB|[A-Z]{2}\d+[-‑–—]\d+|[A-Z]\d{1,2}~\d{1,2}/[A-Z]{1,2}(?:\s*~\s*[A-Z]{1,2})?|[A-Z]\d{1,2}[-‑–—]\d{2,3}[A-Za-z]?|[A-Za-z]牛房|[A-Z]區|全場|lift機房)")
 HEADCOUNT_RE = re.compile(r"[（(]?(\d+)人[）)]?")
 SEGMENT_HEADER_RE = re.compile(r"^\[(?P<ts>\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2})\]\s*(?P<user>.*?):\s*(?P<body>.*)$")
 SEGMENT_START_RE = re.compile(r"^\[\d{4}/\d{1,2}/\d{1,2} \d{1,2}:\d{2}:\d{2}\]\s*.*?:")
@@ -21,7 +21,7 @@ CONTRACTOR_HEADING_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z0-9·•\-~  ]{1,20}
 KNOWN_CONTRACTORS = [
     "陳橋", "藝薪", "藝新", "日麗雅", "明泰", "順利", "萬通", "偉健", "利安", "秦深记", "美時",
     "中機電", "遠東德鴻", "捷信", "駿慶", "萬利", "力成", "仙壁", "康和", "恆昇", "恒記",
-    "浩洲", "安全外勞", "安全外",
+    "浩洲", "新豪", "鉅城", "安全外勞", "安全外",
 ]
 
 KNOWN_TASKS = [
