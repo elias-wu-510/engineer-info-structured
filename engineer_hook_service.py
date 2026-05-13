@@ -284,41 +284,106 @@ def parse_rows_for_summary(log_file: Path, import_state_file: Path, policy_file:
     return parse_rows_from_log(log_file, start_time=start_time, policy=policy)
 
 
-def ensure_daily_view(view_name: str | None = None):
-    """Ensure a daily grid view exists in the current Feishu Bitable table.
+DAILY_TABLE_STATE = {
+    'date': None,
+    'table_id': None,
+}
 
-    Feishu view filters are intentionally not managed here because filter schemas vary
-    by field type/API version. The records still carry the normalized 日期 field, and
-    the daily view provides a per-day workspace that can be filtered manually if needed.
-    """
-    try:
-        from feishu_bitable_import import request_json
 
-        app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
-        table_id = os.environ['FEISHU_BITABLE_TABLE_ID']
-        token = get_tenant_access_token()
-        view_name = view_name or date.today().isoformat()
-        base = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/views'
-        result = request_json(base + '?page_size=100', headers={'Authorization': f'Bearer {token}'}, method='GET')
+DAILY_TABLE_FIELDS = [
+    {'field_name': '發布用戶', 'type': 1, 'is_primary': True},
+    {'field_name': '發送時間', 'type': 1},
+    {'field_name': '日期', 'type': 1},
+    {'field_name': '分區', 'type': 1},
+    {'field_name': '樓棟', 'type': 1},
+    {'field_name': '樓層', 'type': 1},
+    {'field_name': '分判', 'type': 1},
+    {'field_name': '工序', 'type': 1},
+    {'field_name': '人數', 'type': 1},
+    {'field_name': '原始消息', 'type': 1},
+]
+
+
+def request_feishu_json(url: str, token: str, payload: dict | None = None, method: str | None = None):
+    import urllib.request
+    data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode('utf-8')
+    req = urllib.request.Request(url, data=data, method=method or ('POST' if payload is not None else 'GET'))
+    req.add_header('Authorization', f'Bearer {token}')
+    req.add_header('Content-Type', 'application/json; charset=utf-8')
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+
+def list_feishu_tables(app_token: str, token: str) -> list[dict]:
+    tables = []
+    page_token = None
+    base = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables'
+    while True:
+        url = base + '?page_size=100'
+        if page_token:
+            url += '&page_token=' + page_token
+        result = request_feishu_json(url, token)
         if result.get('code') != 0:
-            print(f'WARN: list views failed: {result}', flush=True)
-            return
-        for item in result.get('data', {}).get('items', []):
-            if item.get('view_name') == view_name:
-                return
-        payload = {'view_name': view_name, 'view_type': 'grid'}
-        created = request_json(base, payload, headers={'Authorization': f'Bearer {token}'})
-        if created.get('code') == 0:
-            print(f'Created Feishu daily view: {view_name}', flush=True)
-        else:
-            print(f'WARN: create daily view failed: {created}', flush=True)
-    except Exception as e:
-        print(f'WARN: ensure_daily_view failed: {e}', flush=True)
+            raise RuntimeError(f'list tables failed: {result}')
+        data = result.get('data', {})
+        tables.extend(data.get('items', []))
+        if not data.get('has_more'):
+            break
+        page_token = data.get('page_token')
+    return tables
+
+
+def ensure_daily_table() -> str:
+    """Ensure today's table exists and point FEISHU_BITABLE_TABLE_ID to it."""
+    today = date.today().isoformat()
+    if DAILY_TABLE_STATE.get('date') == today and DAILY_TABLE_STATE.get('table_id'):
+        os.environ['FEISHU_BITABLE_TABLE_ID'] = DAILY_TABLE_STATE['table_id']
+        return DAILY_TABLE_STATE['table_id']
+
+    app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
+    token = get_tenant_access_token()
+    table_name = today
+    tables = list_feishu_tables(app_token, token)
+    for table in tables:
+        name = table.get('name') or table.get('table_name')
+        if name == table_name:
+            table_id = table.get('table_id')
+            os.environ['FEISHU_BITABLE_TABLE_ID'] = table_id
+            DAILY_TABLE_STATE.update({'date': today, 'table_id': table_id})
+            print(f'Using existing Feishu daily table: {table_name} {table_id}', flush=True)
+            return table_id
+
+    base = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables'
+    created = request_feishu_json(base, token, {'table': {'name': table_name}})
+    if created.get('code') != 0:
+        raise RuntimeError(f'create daily table failed: {created}')
+    table_id = created.get('data', {}).get('table_id')
+    if not table_id:
+        raise RuntimeError(f'create daily table returned no table_id: {created}')
+
+    fields_url = f'{base}/{table_id}/fields'
+    existing = request_feishu_json(fields_url + '?page_size=100', token)
+    existing_names = {item.get('field_name') for item in existing.get('data', {}).get('items', [])} if existing.get('code') == 0 else set()
+    for field in DAILY_TABLE_FIELDS:
+        if field['field_name'] in existing_names:
+            continue
+        payload = {'field_name': field['field_name'], 'type': field['type']}
+        if field.get('is_primary'):
+            payload['is_primary'] = True
+        result = request_feishu_json(fields_url, token, payload)
+        if result.get('code') != 0:
+            print(f'WARN: create field failed {field["field_name"]}: {result}', flush=True)
+
+    os.environ['FEISHU_BITABLE_TABLE_ID'] = table_id
+    DAILY_TABLE_STATE.update({'date': today, 'table_id': table_id})
+    print(f'Created Feishu daily table: {table_name} {table_id}', flush=True)
+    return table_id
 
 
 def feishu_import_worker(log_file: Path, args):
     try:
-        print(f'Feishu import worker start for {log_file.name}', flush=True)
+        ensure_daily_table()
+        print(f'Feishu import worker start for {log_file.name} table={os.environ.get("FEISHU_BITABLE_TABLE_ID")}', flush=True)
         created, rows, new_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run)
         if created:
             print(f'Imported {created} new rows from {log_file.name}', flush=True)
@@ -392,7 +457,7 @@ def main():
         load_dotenv(Path(args.env_file))
     state_path = Path(args.state_file)
     state = load_json(state_path, {'log_offsets': {}})
-    ensure_daily_view()
+    ensure_daily_table()
 
     while True:
         try:
