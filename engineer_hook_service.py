@@ -296,9 +296,18 @@ DAILY_TABLE_FIELDS = [
     {'field_name': '發送時間', 'type': 1},
     {'field_name': '日期', 'type': 1},
     {'field_name': '分區', 'type': 1},
-    {'field_name': '樓棟', 'type': 1},
+    {'field_name': '樓棟', 'type': 3, 'property': {'options': [
+        {'name': 'A座'}, {'name': 'B座'}, {'name': 'C座'}, {'name': 'null'},
+    ]}},
     {'field_name': '樓層', 'type': 1},
-    {'field_name': '分判', 'type': 1},
+    {'field_name': '分判', 'type': 3, 'property': {'options': [
+        {'name': '偉健'}, {'name': '利安'}, {'name': '駿慶'}, {'name': '遠東德鴻'}, {'name': '萬利'},
+        {'name': '新豪'}, {'name': '鉅城'}, {'name': '永興'}, {'name': '美時'}, {'name': '健力'},
+        {'name': '日麗雅'}, {'name': '陳橋'}, {'name': '順利'}, {'name': '康和'}, {'name': '萬通'},
+        {'name': '建安'}, {'name': '仙壁'}, {'name': '恆昇'}, {'name': '藝薪'}, {'name': '浩洲'},
+        {'name': '捷信'}, {'name': '億雄'}, {'name': '創豐'}, {'name': '秦深記'}, {'name': '好標準'},
+        {'name': 'null'},
+    ]}},
     {'field_name': '工序', 'type': 1},
     {'field_name': '人數', 'type': 1},
     {'field_name': '原始消息', 'type': 1},
@@ -371,6 +380,8 @@ def ensure_daily_table() -> str:
         payload = {'field_name': field['field_name'], 'type': field['type']}
         if field.get('is_primary'):
             payload['is_primary'] = True
+        if field.get('property'):
+            payload['property'] = field['property']
         result = request_feishu_json(fields_url, token, payload)
         if result.get('code') != 0:
             print(f'WARN: create field failed {field["field_name"]}: {result}', flush=True)
