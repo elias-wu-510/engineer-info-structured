@@ -21,7 +21,7 @@ CONTRACTOR_HEADING_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z0-9·•\-~  ]{1,20}
 KNOWN_CONTRACTORS = [
     "陳橋", "藝薪", "藝新", "日麗雅", "明泰", "順利", "萬通", "偉健", "利安", "秦深记", "美時",
     "中機電", "遠東德鴻", "捷信", "駿慶", "萬利", "力成", "仙壁", "康和", "恆昇", "恒記",
-    "浩洲", "新豪", "鉅城", "安全外勞", "安全外",
+    "浩洲", "新豪", "鉅城", "永興", "安全外勞", "安全外",
 ]
 
 KNOWN_TASKS = [
@@ -177,6 +177,7 @@ def normalize_task_name(task: str | None) -> str:
 
 def final_clean_task(task: str | None, building: str | None = None) -> str:
     task = normalize_task_name(task)
+    task = re.sub(r"^[\s/、，,]+", "", task)
     task = re.sub(r"^人\s*", "", task)
     if building:
         task = task.replace(building, "")
@@ -500,7 +501,7 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
         return None
 
     count = m.group(1)
-    before = clean_task(line[:m.start()])
+    before = final_clean_task(line[:m.start()])
     after = clean_task(line[m.end():])
 
     total_then_detail = re.match(r'^(?P<contractor>[\u4e00-\u9fff]{2,8})$', before)
@@ -554,6 +555,17 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
         task = clean_task(task)
         if task:
             return {"分判": current_contractor, "工序": task, "人數": count, "分區": zone}
+
+    floor_prefix, before_without_floor = extract_floors(before)
+    if floor_prefix and before_without_floor and before_without_floor != before:
+        before_without_floor = final_clean_task(before_without_floor)
+        zone_floor, before_floor_no_zone = extract_zone(before_without_floor)
+        before_floor_no_zone = final_clean_task(before_floor_no_zone)
+        known_floor_contractor, known_floor_task = split_known_contractor(before_floor_no_zone)
+        if known_floor_contractor and (known_floor_task or after):
+            task = final_clean_task(((known_floor_task or "") + " " + after).strip())
+            if task:
+                return {"分判": known_floor_contractor, "工序": task, "人數": count, "分區": zone_floor}
 
     if current_contractor and is_valid_contractor(current_contractor) and before:
         zone_new, before_no_zone = extract_zone(before)
@@ -730,7 +742,9 @@ def parse_segment(seg: dict):
         elif HEADCOUNT_RE.search(line) and pending_floor:
             row_floor = pending_floor
 
-        inline = maybe_extract_inline_record(line_for_record, current_contractor)
+        floor_removed_from_record = bool(embedded_floors and HEADCOUNT_RE.search(line))
+        inline_current_contractor = None if floor_removed_from_record else current_contractor
+        inline = maybe_extract_inline_record(line_for_record, inline_current_contractor)
         if not inline and not HEADCOUNT_RE.search(line_for_record):
             inline = parse_no_headcount_record(line_for_record, current_contractor)
         if inline:
