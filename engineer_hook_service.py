@@ -6,6 +6,7 @@ import re
 import sys
 import threading
 import time
+from datetime import date
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -283,6 +284,38 @@ def parse_rows_for_summary(log_file: Path, import_state_file: Path, policy_file:
     return parse_rows_from_log(log_file, start_time=start_time, policy=policy)
 
 
+def ensure_daily_view(view_name: str | None = None):
+    """Ensure a daily grid view exists in the current Feishu Bitable table.
+
+    Feishu view filters are intentionally not managed here because filter schemas vary
+    by field type/API version. The records still carry the normalized 日期 field, and
+    the daily view provides a per-day workspace that can be filtered manually if needed.
+    """
+    try:
+        from feishu_bitable_import import request_json
+
+        app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
+        table_id = os.environ['FEISHU_BITABLE_TABLE_ID']
+        token = get_tenant_access_token()
+        view_name = view_name or date.today().isoformat()
+        base = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/views'
+        result = request_json(base + '?page_size=100', headers={'Authorization': f'Bearer {token}'}, method='GET')
+        if result.get('code') != 0:
+            print(f'WARN: list views failed: {result}', flush=True)
+            return
+        for item in result.get('data', {}).get('items', []):
+            if item.get('view_name') == view_name:
+                return
+        payload = {'view_name': view_name, 'view_type': 'grid'}
+        created = request_json(base, payload, headers={'Authorization': f'Bearer {token}'})
+        if created.get('code') == 0:
+            print(f'Created Feishu daily view: {view_name}', flush=True)
+        else:
+            print(f'WARN: create daily view failed: {created}', flush=True)
+    except Exception as e:
+        print(f'WARN: ensure_daily_view failed: {e}', flush=True)
+
+
 def feishu_import_worker(log_file: Path, args):
     try:
         print(f'Feishu import worker start for {log_file.name}', flush=True)
@@ -359,6 +392,7 @@ def main():
         load_dotenv(Path(args.env_file))
     state_path = Path(args.state_file)
     state = load_json(state_path, {'log_offsets': {}})
+    ensure_daily_view()
 
     while True:
         try:
