@@ -32,6 +32,7 @@ from auto_import_latest_log import (  # noqa: E402
     parse_start_time,
     row_fingerprint,
     save_state as save_import_state,
+    merge_same_work_rows,
 )
 from log_to_feishu import rows_to_csv  # noqa: E402
 from feishu_bitable_import import get_tenant_access_token, parse_csv_text, upload_records  # noqa: E402
@@ -380,6 +381,42 @@ def ensure_daily_table() -> str:
     return table_id
 
 
+def list_feishu_records(app_token: str, table_id: str, token: str) -> list[dict]:
+    records = []
+    page_token = None
+    base = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records'
+    while True:
+        url = base + '?page_size=500'
+        if page_token:
+            url += '&page_token=' + page_token
+        result = request_feishu_json(url, token)
+        if result.get('code') != 0:
+            raise RuntimeError(f'list records failed: {result}')
+        data = result.get('data', {})
+        records.extend(data.get('items', []))
+        if not data.get('has_more'):
+            break
+        page_token = data.get('page_token')
+    return records
+
+
+def parse_rows_for_summary_from_feishu(requested_date: str | None = None) -> list[dict]:
+    table_id = ensure_daily_table()
+    app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
+    token = get_tenant_access_token()
+    items = list_feishu_records(app_token, table_id, token)
+    rows = []
+    for item in items:
+        fields = item.get('fields') or {}
+        row = {k: str(fields.get(k, 'null') if fields.get(k, '') != '' else 'null') for k in [
+            '發布用戶', '發送時間', '日期', '分區', '樓棟', '樓層', '分判', '工序', '人數', '原始消息'
+        ]}
+        if requested_date and display_record_date(row.get('日期')) != requested_date:
+            continue
+        rows.append(row)
+    return merge_same_work_rows(rows)
+
+
 def feishu_import_worker(log_file: Path, args):
     try:
         ensure_daily_table()
@@ -407,7 +444,12 @@ def run_once(args, service_state: dict):
         requested_date = parse_requested_summary_date(trigger_text)
         print(f'Summary trigger detected in {log_file.name}: {trigger_msg_id or "no-msg-id"} requested_date={requested_date or "all"}', flush=True)
         send_reaction(trigger_msg_id, '👀', args.react_url, dry_run=args.dry_run)
-        rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
+        try:
+            rows = parse_rows_for_summary_from_feishu(requested_date=requested_date)
+            print(f'Summary loaded {len(rows)} rows from Feishu table', flush=True)
+        except Exception as e:
+            print(f'WARN: summary read from Feishu failed, fallback to log parse: {e}', flush=True)
+            rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
         summary = build_summary(rows, requested_date=requested_date)
         send_whatsapp(args.target_group, summary, args.send_url, dry_run=args.dry_run)
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
