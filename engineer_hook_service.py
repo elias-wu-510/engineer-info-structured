@@ -450,7 +450,9 @@ def run_once(args, service_state: dict):
     service_state['last_log'] = str(log_file)
 
     # Summary trigger must stay responsive even if Feishu import is slow/stuck.
+    summary_triggered = False
     if new_text and contains_summary_trigger(new_text):
+        summary_triggered = True
         trigger_msg_id, trigger_text = find_summary_trigger(new_text)
         requested_date = parse_requested_summary_date(trigger_text)
         print(f'Summary trigger detected in {log_file.name}: {trigger_msg_id or "no-msg-id"} requested_date={requested_date or "all"}', flush=True)
@@ -466,7 +468,11 @@ def run_once(args, service_state: dict):
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent WhatsApp summary to {args.target_group}', flush=True)
 
-    if new_text and not service_state.get('feishu_import_running'):
+    # A pure summary trigger should not start Feishu import; otherwise the importer
+    # reparses old log content around the trigger and can duplicate historical rows.
+    if new_text and summary_triggered:
+        print('Skipping Feishu import for summary trigger batch', flush=True)
+    elif new_text and not service_state.get('feishu_import_running'):
         print(f'Scheduling Feishu import for {log_file.name}', flush=True)
         service_state['feishu_import_running'] = True
         service_state['feishu_import_log'] = str(log_file)
