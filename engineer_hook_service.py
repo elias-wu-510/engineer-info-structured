@@ -213,7 +213,7 @@ def build_summary(rows: list[dict], requested_date: str | None = None) -> str:
         blocks.append(date_label)
         grouped = by_date[date_label]
         for building in sorted(grouped):
-            blocks.append(f'*{building}*')
+            blocks.append(f'*✅{building}*')
             floors = grouped[building]
             for floor in sorted(floors, key=floor_sort_key):
                 blocks.append(floor)
