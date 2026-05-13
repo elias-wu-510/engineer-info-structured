@@ -1,0 +1,93 @@
+import csv
+import io
+import json
+import os
+import urllib.request
+
+from feishu_bitable_import import CSV_COLUMNS
+
+SYSTEM_PROMPT = """你是工程施工報工信息結構化助手。
+當規則解析器無法解析消息時，你只輸出 CSV，不要解釋。
+CSV 表頭必須嚴格為：發布用戶,發送時間,日期,分區,樓棟,樓層,分判,工序,人數,原始消息
+如果沒有有效工程記錄，輸出 exactly: 无有效记录
+規則：
+- 日期統一 DD/MM/YYYY；如果只有日/月，默認年份 2026。
+- 樓棟統一 A座/B座/C座。
+- 人數只輸出數字；缺失用 null。
+- 缺失字段用 null。
+- 原始消息填入完整原文。
+- 分判必須是中文公司/隊伍名，不要把 zone、樓層、ST01、B5 等當分判。
+- 一條消息中多個分判/工序/人數要拆成多行。
+"""
+
+
+def enabled() -> bool:
+    return bool(os.getenv("LLM_API_BASE_URL") and os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL"))
+
+
+def _request_llm(prompt: str) -> str:
+    payload = {
+        "model": os.environ["LLM_MODEL"],
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+    }
+    req = urllib.request.Request(
+        os.environ["LLM_API_BASE_URL"],
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        method="POST",
+    )
+    req.add_header("Authorization", f"Bearer {os.environ['LLM_API_KEY']}")
+    req.add_header("Content-Type", "application/json; charset=utf-8")
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    msg = choices[0].get("message") or {}
+    return msg.get("content") or ""
+
+
+def _strip_fence(text: str) -> str:
+    text = (text or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def parse_csv_output(text: str) -> list[dict]:
+    text = _strip_fence(text)
+    if not text or text.strip() == "无有效记录":
+        return []
+    reader = csv.DictReader(io.StringIO(text))
+    if reader.fieldnames != CSV_COLUMNS:
+        raise ValueError(f"LLM CSV header mismatch: {reader.fieldnames}")
+    rows = []
+    for row in reader:
+        item = {k: (row.get(k, "") or "").strip() for k in CSV_COLUMNS}
+        if not any(item.values()):
+            continue
+        if not item["人數"]:
+            item["人數"] = "null"
+        rows.append(item)
+    return rows
+
+
+def parse_message(text: str, sender: str, sent_time: str) -> list[dict]:
+    if not enabled():
+        return []
+    prompt = f"""請將以下 WhatsApp 工程報工消息結構化為 CSV。
+發布用戶：{sender}
+發送時間：{sent_time}
+原始消息：
+{text}
+"""
+    output = _request_llm(prompt)
+    return parse_csv_output(output)

@@ -10,6 +10,7 @@ from pathlib import Path
 from log_to_feishu import split_segments, parse_segment, rows_to_csv
 from extract_engineering_messages import extract_messages, looks_like_engineering_message
 from feishu_bitable_import import get_tenant_access_token, parse_csv_text, upload_records, CSV_COLUMNS
+from llm_fallback_parser import parse_message as parse_message_with_llm, enabled as llm_enabled
 
 DEFAULT_LOG_DIR = Path(os.environ.get('ENGINEER_LOG_DIR', './logs'))
 DEFAULT_STATE = Path(os.environ.get('ENGINEER_IMPORT_STATE_FILE', '.state/feishu-import-state.json'))
@@ -118,13 +119,26 @@ def parse_rows_from_log(log_file: Path, start_time=None, policy=None) -> list[di
             continue
         parse_text = normalize_structured_text(msg['text']) if trusted_only else msg['text']
         sender_label = policy.get('trustedSenderLabel') if trusted_only else msg.get('sender', 'null')
+        message_rows = []
         for seg in split_segments(parse_text, sender_label or msg.get('sender', 'null'), msg.get('log_ts', 'null')):
-            for row in parse_segment(seg):
-                fp = row_fingerprint(row)
-                if fp in seen:
-                    continue
-                seen.add(fp)
-                rows.append(row)
+            message_rows.extend(parse_segment(seg))
+        if not message_rows and policy.get('llmFallback', True) and llm_enabled():
+            try:
+                message_rows = parse_message_with_llm(
+                    msg.get('text', ''),
+                    sender_label or msg.get('sender', 'null'),
+                    msg.get('log_ts', 'null'),
+                )
+                if message_rows:
+                    print(f'LLM fallback parsed {len(message_rows)} rows for {msg.get("log_ts")}', flush=True)
+            except Exception as exc:
+                print(f'WARN: LLM fallback failed for {msg.get("log_ts")}: {exc}', flush=True)
+        for row in message_rows:
+            fp = row_fingerprint(row)
+            if fp in seen:
+                continue
+            seen.add(fp)
+            rows.append(row)
     if skipped_candidates:
         state_note_path = DEFAULT_STATE.parent / 'auto-import-skipped.log'
         with state_note_path.open('a', encoding='utf-8') as f:
