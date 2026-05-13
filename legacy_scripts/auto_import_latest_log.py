@@ -95,6 +95,34 @@ def parse_start_time(value: str | None):
     raise SystemExit(f'Invalid startTime format: {value}')
 
 
+
+
+def merge_same_work_rows(rows: list[dict]) -> list[dict]:
+    """Merge rows that only differ by floor for the same source/work/headcount.
+
+    If one message says the same contractor/task/headcount across multiple floors,
+    keep one row and join the floors instead of repeating the same headcount per floor.
+    """
+    merged = []
+    by_key = {}
+    for row in rows:
+        key = tuple((row.get(k) or 'null') for k in [
+            '發布用戶', '發送時間', '日期', '分區', '樓棟', '分判', '工序', '人數', '原始消息'
+        ])
+        if key not in by_key:
+            item = dict(row)
+            by_key[key] = item
+            merged.append(item)
+            continue
+        item = by_key[key]
+        existing = [x.strip() for x in str(item.get('樓層') or 'null').replace('，', ',').split(',') if x.strip() and x.strip() != 'null']
+        incoming = [x.strip() for x in str(row.get('樓層') or 'null').replace('，', ',').split(',') if x.strip() and x.strip() != 'null']
+        for floor in incoming:
+            if floor not in existing:
+                existing.append(floor)
+        item['樓層'] = '，'.join(existing) if existing else 'null'
+    return merged
+
 def parse_rows_from_log(log_file: Path, start_time=None, policy=None) -> list[dict]:
     policy = policy or {"mode": "all_engineering", "fallbackRawImport": True}
     trusted_only = policy.get('mode') == 'trusted_structured_sender_only'
@@ -138,6 +166,7 @@ def parse_rows_from_log(log_file: Path, start_time=None, policy=None) -> list[di
                         message_rows = llm_rows
             except Exception as exc:
                 print(f'WARN: LLM parse failed for {msg.get("log_ts")}: {exc}', flush=True)
+        message_rows = merge_same_work_rows(message_rows)
         for row in message_rows:
             fp = row_fingerprint(row)
             if fp in seen:
