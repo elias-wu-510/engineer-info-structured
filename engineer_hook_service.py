@@ -705,7 +705,6 @@ def run_once(args, service_state: dict):
         html_path, png_path = render_process_report(process_rows, report_date, args.report_dir)
         text_summary = build_process_text_summary(process_rows, report_date)
         send_whatsapp(args.target_group, text_summary, args.send_url, dry_run=args.dry_run)
-        send_whatsapp(args.target_group, f'工序人數表已生成：\nHTML: {html_path}\nPNG: {png_path}', args.send_url, dry_run=args.dry_run)
         send_reaction(process_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent process summary to {args.target_group}; files: {html_path}, {png_path}', flush=True)
     elif normal_text:
