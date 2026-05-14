@@ -191,8 +191,15 @@ def parse_requested_summary_date(text: str | None) -> str | None:
         return f'{int(d):02d}/{int(mo):02d}/{y}'
     m = re.search(patterns[2], text)
     if m:
-        d, mo = m.groups()
-        return f'{int(d):02d}/{int(mo):02d}/2026'
+        first, second = (int(x) for x in m.groups())
+        # Support both common inputs:
+        # - 13/5 = day/month
+        # - 5/13 = month/day
+        if second > 12 and first <= 12:
+            d, mo = second, first
+        else:
+            d, mo = first, second
+        return f'{d:02d}/{mo:02d}/2026'
     m = re.search(patterns[3], text)
     if m:
         mo, d = m.groups()
