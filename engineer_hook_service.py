@@ -559,16 +559,24 @@ def aggregate_process_headcount(rows: list[dict], requested_date: str | None, ke
 def ensure_named_feishu_table(name: str, fields: list[dict]) -> str:
     app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
     token = get_tenant_access_token()
+    base = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables'
+    table_id = None
     for table in list_feishu_tables(app_token, token):
         if (table.get('name') or table.get('table_name')) == name:
-            return table.get('table_id')
-    base = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables'
-    created = request_feishu_json(base, token, {'table': {'name': name}})
-    if created.get('code') != 0:
-        raise RuntimeError(f'create table failed: {created}')
-    table_id = created.get('data', {}).get('table_id')
+            table_id = table.get('table_id')
+            break
+    if not table_id:
+        created = request_feishu_json(base, token, {'table': {'name': name}})
+        if created.get('code') != 0:
+            raise RuntimeError(f'create table failed: {created}')
+        table_id = created.get('data', {}).get('table_id')
+
     fields_url = f'{base}/{table_id}/fields'
+    existing = request_feishu_json(fields_url + '?page_size=100', token)
+    existing_names = {item.get('field_name') for item in existing.get('data', {}).get('items', [])} if existing.get('code') == 0 else set()
     for field in fields:
+        if field['field_name'] in existing_names:
+            continue
         payload = {'field_name': field['field_name'], 'type': field['type']}
         if field.get('is_primary'):
             payload['is_primary'] = True
@@ -590,7 +598,21 @@ def replace_feishu_records(table_id: str, records: list[dict]):
     url = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records/batch_create'
     for i in range(0, len(records), 200):
         chunk = records[i:i+200]
-        result = request_feishu_json(url, token, {'records': [{'fields': {k: str(v) for k, v in r.items() if k != '日期' or v}} for r in chunk]})
+        payload_records = []
+        for r in chunk:
+            fields = {}
+            for k, v in r.items():
+                if k == '日期' and not v:
+                    continue
+                if k == '人數':
+                    try:
+                        fields[k] = int(v or 0)
+                    except Exception:
+                        fields[k] = 0
+                else:
+                    fields[k] = str(v)
+            payload_records.append({'fields': fields})
+        result = request_feishu_json(url, token, {'records': payload_records})
         if result.get('code') != 0:
             raise RuntimeError(f'create process records failed: {result}')
 
