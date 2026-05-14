@@ -165,6 +165,14 @@ def date_sort_key(value: str):
     return (9999, 99, 99, value)
 
 
+def table_name_from_display_date(value: str | None) -> str | None:
+    m = re.fullmatch(r'(\d{2})/(\d{2})/(\d{4})', str(value or '').strip())
+    if not m:
+        return None
+    d, mo, y = m.groups()
+    return f'{y}-{mo}-{d}'
+
+
 def parse_requested_summary_date(text: str | None) -> str | None:
     text = str(text or '')
     patterns = [
@@ -434,9 +442,23 @@ def list_feishu_records(app_token: str, table_id: str, token: str) -> list[dict]
 
 
 def parse_rows_for_summary_from_feishu(requested_date: str | None = None) -> list[dict]:
-    table_id = ensure_daily_table()
     app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
     token = get_tenant_access_token()
+    if requested_date:
+        table_name = table_name_from_display_date(requested_date)
+        table_id = None
+        if table_name:
+            for table in list_feishu_tables(app_token, token):
+                name = table.get('name') or table.get('table_name')
+                if name == table_name:
+                    table_id = table.get('table_id')
+                    break
+        if not table_id:
+            print(f'WARN: requested Feishu daily table not found for {requested_date}', flush=True)
+            return []
+        print(f'Using requested Feishu daily table: {table_name} {table_id}', flush=True)
+    else:
+        table_id = ensure_daily_table()
     items = list_feishu_records(app_token, table_id, token)
     rows = []
     for item in items:
