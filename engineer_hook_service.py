@@ -637,14 +637,38 @@ def render_process_report(rows: list[dict], report_date: str, report_dir: str | 
     html_path.write_text(html_text, encoding='utf-8')
     try:
         from PIL import Image, ImageDraw, ImageFont
-        font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 18)
-        w, row_h = 1400, 34
-        img = Image.new('RGB', (w, max(120, row_h * (len(rows) + 3))), 'white')
+        font_path = next((fp for fp in [
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        ] if Path(fp).exists()), None)
+        bold_path = next((fp for fp in [
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc',
+            '/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc',
+            font_path,
+        ] if fp and Path(fp).exists()), font_path)
+        font = ImageFont.truetype(font_path, 24) if font_path else ImageFont.load_default()
+        bold = ImageFont.truetype(bold_path, 28) if bold_path else font
+        cols = [110, 240, 820, 90]
+        w, row_h = sum(cols) + 60, 48
+        img = Image.new('RGB', (w, max(180, row_h * (len(rows) + 3) + 30)), 'white')
         d = ImageDraw.Draw(img)
-        y = 10; d.text((10,y), f'工序人數表 {report_date}', fill='black', font=font); y += row_h
-        d.text((10,y), '樓棟 | 工序 | 樓層/分區 | 人數', fill='black', font=font); y += row_h
+        y = 18
+        d.text((30, y), f'工序人數表 {report_date}', fill='black', font=bold); y += 54
+        headers = ['樓棟', '工序', '樓層/分區', '人數']
+        x = 30
+        for h, cw in zip(headers, cols):
+            d.rectangle([x, y, x + cw, y + row_h], fill=(235, 235, 235), outline=(120, 120, 120))
+            d.text((x + 8, y + 8), h, fill='black', font=font)
+            x += cw
+        y += row_h
         for r in rows:
-            d.text((10,y), f"{r['樓棟']} | {r['工序']} | {r['樓層/分區']} | {r['人數']}", fill='black', font=font)
+            x = 30
+            vals = [r['樓棟'], r['工序'], r['樓層/分區'], str(r['人數'])]
+            for v, cw in zip(vals, cols):
+                d.rectangle([x, y, x + cw, y + row_h], fill='white', outline=(160, 160, 160))
+                d.text((x + 8, y + 8), str(v)[:80], fill='black', font=font)
+                x += cw
             y += row_h
         img.save(png_path)
     except Exception as e:
