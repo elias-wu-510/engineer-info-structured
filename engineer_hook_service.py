@@ -192,27 +192,45 @@ def parse_requested_summary_date(text: str | None) -> str | None:
     return None
 
 
-def build_summary(rows: list[dict], requested_date: str | None = None) -> str:
-    if not rows:
-        return '今日無工地記錄。'
+BUILDING_SUMMARY_ORDER = ['A座', 'B座', 'C座', 'Null']
+
+
+def summary_building_label(value: str | None) -> str:
+    raw = str(value or '').strip()
+    if not raw or raw.lower() == 'null' or raw == '未標明樓棟':
+        return 'Null'
+    return raw
+
+
+def build_summary(rows: list[dict], requested_date: str | None = None, building_filter: str | None = None) -> str:
+    target_building = summary_building_label(building_filter) if building_filter else None
+    heading = target_building or None
 
     by_date = {}
     for r in rows:
         date_label = display_record_date(r.get('日期'))
         if requested_date and date_label != requested_date:
             continue
-        building = (r.get('樓棟') or '未標明樓棟').strip() or '未標明樓棟'
+        building = summary_building_label(r.get('樓棟'))
+        if target_building and building != target_building:
+            continue
         floor = (r.get('樓層') or '未標明樓層').strip() or '未標明樓層'
         by_date.setdefault(date_label, {}).setdefault(building, {}).setdefault(floor, []).append(r)
 
-    if requested_date and not by_date:
-        return f'{requested_date}\n今日無工地記錄。'
+    if not by_date:
+        prefix = f'{requested_date}\n' if requested_date else ''
+        if heading:
+            return f'{prefix}*✅{heading}*\n今日無工地記錄。'
+        return f'{prefix}今日無工地記錄。'.strip()
 
     blocks = []
     for date_label in sorted(by_date, key=date_sort_key):
         blocks.append(date_label)
         grouped = by_date[date_label]
-        for building in sorted(grouped):
+        building_names = [target_building] if target_building else sorted(grouped)
+        for building in building_names:
+            if building not in grouped:
+                continue
             blocks.append(f'*✅{building}*')
             floors = grouped[building]
             for floor in sorted(floors, key=floor_sort_key):
@@ -228,6 +246,10 @@ def build_summary(rows: list[dict], requested_date: str | None = None) -> str:
                 blocks.append('')
         blocks.append('')
     return '\n'.join(blocks).strip()
+
+
+def build_summary_messages(rows: list[dict], requested_date: str | None = None) -> list[str]:
+    return [build_summary(rows, requested_date=requested_date, building_filter=building) for building in BUILDING_SUMMARY_ORDER]
 
 
 def send_reaction(message_id: str | None, emoji: str, react_url: str, dry_run=False):
@@ -463,10 +485,12 @@ def run_once(args, service_state: dict):
         except Exception as e:
             print(f'WARN: summary read from Feishu failed, fallback to log parse: {e}', flush=True)
             rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
-        summary = build_summary(rows, requested_date=requested_date)
-        send_whatsapp(args.target_group, summary, args.send_url, dry_run=args.dry_run)
+        summaries = build_summary_messages(rows, requested_date=requested_date)
+        for summary in summaries:
+            send_whatsapp(args.target_group, summary, args.send_url, dry_run=args.dry_run)
+            time.sleep(0.2)
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
-        print(f'Sent WhatsApp summary to {args.target_group}', flush=True)
+        print(f'Sent {len(summaries)} WhatsApp summary messages to {args.target_group}', flush=True)
 
     # A pure summary trigger should not start Feishu import; otherwise the importer
     # reparses old log content around the trigger and can duplicate historical rows.
