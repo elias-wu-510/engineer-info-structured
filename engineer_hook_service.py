@@ -6,6 +6,7 @@ import re
 import sys
 import threading
 import time
+import html
 from datetime import date
 from pathlib import Path
 
@@ -20,6 +21,7 @@ DEFAULT_TARGET_GROUP = None
 DEFAULT_SEND_URL = None
 DEFAULT_REACT_URL = None
 SUMMARY_RE = re.compile(r'(?:总结|總結|summary)', re.I)
+PROCESS_SUMMARY_RE = re.compile(r'(?:工序總結|工序总结|工序表|process\s*summary|process\s*table)', re.I)
 LOG_MSG_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] \[LOG\] 文本消息内容: (?P<content>.*)$')
 RECEIVED_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] 收到消息，.*?msgId: (?P<msg_id>[^,]+)')
 
@@ -84,7 +86,7 @@ def read_new_bytes(path: Path, state: dict):
     return data
 
 
-def find_summary_trigger(text: str) -> tuple[str | None, str | None]:
+def find_trigger(text: str, pattern: re.Pattern) -> tuple[str | None, str | None]:
     current_msg_id = None
     for line in text.splitlines():
         received = RECEIVED_RE.match(line)
@@ -95,18 +97,27 @@ def find_summary_trigger(text: str) -> tuple[str | None, str | None]:
         m = LOG_MSG_RE.match(line)
         if m:
             content = m.group('content').strip()
-            if SUMMARY_RE.search(content):
+            if pattern.search(content):
                 return current_msg_id, content
     return None, None
 
+
+def find_summary_trigger(text: str) -> tuple[str | None, str | None]:
+    return find_trigger(text, SUMMARY_RE)
+
+def find_process_summary_trigger(text: str) -> tuple[str | None, str | None]:
+    return find_trigger(text, PROCESS_SUMMARY_RE)
 
 def find_summary_trigger_message_id(text: str) -> str | None:
     msg_id, _ = find_summary_trigger(text)
     return msg_id
 
-
 def contains_summary_trigger(text: str) -> bool:
     _, content = find_summary_trigger(text)
+    return content is not None
+
+def contains_process_summary_trigger(text: str) -> bool:
+    _, content = find_process_summary_trigger(text)
     return content is not None
 
 
@@ -479,6 +490,151 @@ def parse_rows_for_summary_from_feishu(requested_date: str | None = None) -> lis
     return merge_same_work_rows(rows)
 
 
+PROCESS_TABLE_FIELDS = [
+    {'field_name': '樓棟', 'type': 1, 'is_primary': True},
+    {'field_name': '工序', 'type': 1},
+    {'field_name': '樓層/分區', 'type': 1},
+    {'field_name': '人數', 'type': 1},
+    {'field_name': '日期', 'type': 1},
+]
+
+
+def load_process_keywords(path: str | None) -> list[str]:
+    if not path:
+        return []
+    p = Path(path).expanduser()
+    if not p.exists():
+        print(f'WARN: process keyword xlsx not found: {p}', flush=True)
+        return []
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
+        ws = wb.active
+        words = []
+        for row in ws.iter_rows(values_only=True):
+            for cell in row:
+                val = str(cell or '').strip()
+                if val and val.lower() not in {'工序', 'process', 'keyword', 'keywords', '關鍵字', '关键字'}:
+                    words.append(val)
+        return sorted(set(words), key=len, reverse=True)
+    except Exception as e:
+        print(f'WARN: failed to load process keywords from {p}: {e}', flush=True)
+        return []
+
+
+def normalize_process(task: str, keywords: list[str]) -> str:
+    raw = str(task or '').strip() or '未標明工序'
+    for kw in keywords:
+        if kw and kw in raw:
+            return kw
+    return raw
+
+
+def aggregate_process_headcount(rows: list[dict], requested_date: str | None, keyword_path: str | None) -> list[dict]:
+    keywords = load_process_keywords(keyword_path)
+    grouped = {}
+    for r in rows:
+        if requested_date and display_record_date(r.get('日期')) != requested_date:
+            continue
+        building = summary_building_label(r.get('樓棟'))
+        process = normalize_process(r.get('工序'), keywords)
+        count_raw = str(r.get('人數') or '').strip()
+        count = int(count_raw) if count_raw.isdigit() else 0
+        floor = str(r.get('樓層') or '').strip()
+        zone = str(r.get('分區') or '').strip()
+        loc = ' '.join(x for x in [floor, zone] if x and x.lower() != 'null') or '未標明位置'
+        key = (building, process)
+        item = grouped.setdefault(key, {'樓棟': building, '工序': process, '人數': 0, '日期': requested_date or '', 'locations': {}})
+        item['人數'] += count
+        item['locations'][loc] = item['locations'].get(loc, 0) + count
+    result = []
+    order = {b: i for i, b in enumerate(BUILDING_SUMMARY_ORDER)}
+    for item in grouped.values():
+        locs = [f'{k}({v}人)' if v else k for k, v in sorted(item.pop('locations').items())]
+        item['樓層/分區'] = '、'.join(locs)
+        result.append(item)
+    return sorted(result, key=lambda x: (order.get(x['樓棟'], 99), x['工序']))
+
+
+def ensure_named_feishu_table(name: str, fields: list[dict]) -> str:
+    app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
+    token = get_tenant_access_token()
+    for table in list_feishu_tables(app_token, token):
+        if (table.get('name') or table.get('table_name')) == name:
+            return table.get('table_id')
+    base = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables'
+    created = request_feishu_json(base, token, {'table': {'name': name}})
+    if created.get('code') != 0:
+        raise RuntimeError(f'create table failed: {created}')
+    table_id = created.get('data', {}).get('table_id')
+    fields_url = f'{base}/{table_id}/fields'
+    for field in fields:
+        payload = {'field_name': field['field_name'], 'type': field['type']}
+        if field.get('is_primary'):
+            payload['is_primary'] = True
+        result = request_feishu_json(fields_url, token, payload)
+        if result.get('code') != 0:
+            print(f'WARN: create process field failed {field["field_name"]}: {result}', flush=True)
+    return table_id
+
+
+def replace_feishu_records(table_id: str, records: list[dict]):
+    app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
+    token = get_tenant_access_token()
+    for item in list_feishu_records(app_token, table_id, token):
+        rid = item.get('record_id') or item.get('id')
+        if rid:
+            request_feishu_json(f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records/{rid}', token, method='DELETE')
+    if not records:
+        return
+    url = f'https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records/batch_create'
+    for i in range(0, len(records), 200):
+        chunk = records[i:i+200]
+        result = request_feishu_json(url, token, {'records': [{'fields': {k: str(v) for k, v in r.items() if k != '日期' or v}} for r in chunk]})
+        if result.get('code') != 0:
+            raise RuntimeError(f'create process records failed: {result}')
+
+
+def render_process_report(rows: list[dict], report_date: str, report_dir: str | None) -> tuple[Path, Path]:
+    out_dir = Path(report_dir or os.environ.get('ENGINEER_REPORT_DIR') or '/home/claw/.openclaw/workspace-engineer-info-structured/reports')
+    out_dir.mkdir(parents=True, exist_ok=True)
+    iso = table_name_from_display_date(report_date) or date.today().isoformat()
+    html_path = out_dir / f'process-summary-{iso}.html'
+    png_path = out_dir / f'process-summary-{iso}.png'
+    trs = ''.join(f"<tr><td>{html.escape(r['樓棟'])}</td><td>{html.escape(r['工序'])}</td><td>{html.escape(r['樓層/分區'])}</td><td>{r['人數']}</td></tr>" for r in rows)
+    html_text = f'''<!doctype html><html><head><meta charset="utf-8"><style>body{{font-family:Arial,"Noto Sans CJK TC",sans-serif}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #888;padding:8px;text-align:left}}th{{background:#eee}}h2{{text-align:center}}</style></head><body><h2>工序人數表 {html.escape(report_date)}</h2><table><tr><th>樓棟</th><th>工序</th><th>樓層/分區</th><th>人數</th></tr>{trs}</table></body></html>'''
+    html_path.write_text(html_text, encoding='utf-8')
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 18)
+        w, row_h = 1400, 34
+        img = Image.new('RGB', (w, max(120, row_h * (len(rows) + 3))), 'white')
+        d = ImageDraw.Draw(img)
+        y = 10; d.text((10,y), f'工序人數表 {report_date}', fill='black', font=font); y += row_h
+        d.text((10,y), '樓棟 | 工序 | 樓層/分區 | 人數', fill='black', font=font); y += row_h
+        for r in rows:
+            d.text((10,y), f"{r['樓棟']} | {r['工序']} | {r['樓層/分區']} | {r['人數']}", fill='black', font=font)
+            y += row_h
+        img.save(png_path)
+    except Exception as e:
+        print(f'WARN: png render failed: {e}', flush=True)
+        png_path.write_bytes(b'')
+    return html_path, png_path
+
+
+def build_process_text_summary(rows: list[dict], report_date: str) -> str:
+    if not rows:
+        return f'{report_date}\n工序人數表：今日無工地記錄。'
+    totals = {}
+    for r in rows:
+        totals[r['樓棟']] = totals.get(r['樓棟'], 0) + int(r.get('人數') or 0)
+    lines = [f'{report_date}', '*工序人數摘要*']
+    for b in BUILDING_SUMMARY_ORDER:
+        if b in totals:
+            lines.append(f'{b}：{totals[b]}人')
+    lines.append(f'總計：{sum(totals.values())}人；工序項目：{len(rows)}項')
+    return '\n'.join(lines)
+
 def feishu_import_worker(log_file: Path, args):
     try:
         ensure_daily_table()
@@ -500,11 +656,39 @@ def run_once(args, service_state: dict):
     new_text = read_new_bytes(log_file, service_state)
     service_state['last_log'] = str(log_file)
 
-    # Summary trigger must stay responsive even if Feishu import is slow/stuck.
+    # Summary triggers must stay responsive even if Feishu import is slow/stuck.
     summary_triggered = False
-    if new_text and contains_summary_trigger(new_text):
+    process_msg_id, process_text = find_process_summary_trigger(new_text) if new_text else (None, None)
+    normal_msg_id, normal_text = find_summary_trigger(new_text) if new_text else (None, None)
+    if process_text:
         summary_triggered = True
-        trigger_msg_id, trigger_text = find_summary_trigger(new_text)
+        requested_date = parse_requested_summary_date(process_text)
+        report_date = requested_date or date.today().strftime('%d/%m/%Y')
+        print(f'Process summary trigger detected in {log_file.name}: {process_msg_id or "no-msg-id"} requested_date={requested_date or "today"}', flush=True)
+        send_reaction(process_msg_id, '👀', args.react_url, dry_run=args.dry_run)
+        try:
+            rows = parse_rows_for_summary_from_feishu(requested_date=requested_date)
+            print(f'Process summary loaded {len(rows)} rows from Feishu table', flush=True)
+        except Exception as e:
+            print(f'WARN: process summary read from Feishu failed, fallback to log parse: {e}', flush=True)
+            rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
+        process_rows = aggregate_process_headcount(rows, requested_date, args.process_keyword_xlsx)
+        table_name = '工序人數表-' + (table_name_from_display_date(report_date) or date.today().isoformat())
+        if not args.dry_run:
+            table_id = ensure_named_feishu_table(table_name, PROCESS_TABLE_FIELDS)
+            replace_feishu_records(table_id, [{**r, '日期': report_date} for r in process_rows])
+            print(f'Updated Feishu process table {table_name} rows={len(process_rows)}', flush=True)
+        else:
+            print(f'DRY RUN: would update Feishu process table {table_name} rows={len(process_rows)}', flush=True)
+        html_path, png_path = render_process_report(process_rows, report_date, args.report_dir)
+        text_summary = build_process_text_summary(process_rows, report_date)
+        send_whatsapp(args.target_group, text_summary, args.send_url, dry_run=args.dry_run)
+        send_whatsapp(args.target_group, f'工序人數表已生成：\nHTML: {html_path}\nPNG: {png_path}', args.send_url, dry_run=args.dry_run)
+        send_reaction(process_msg_id, '✅', args.react_url, dry_run=args.dry_run)
+        print(f'Sent process summary to {args.target_group}; files: {html_path}, {png_path}', flush=True)
+    elif normal_text:
+        summary_triggered = True
+        trigger_msg_id, trigger_text = normal_msg_id, normal_text
         requested_date = parse_requested_summary_date(trigger_text)
         print(f'Summary trigger detected in {log_file.name}: {trigger_msg_id or "no-msg-id"} requested_date={requested_date or "all"}', flush=True)
         send_reaction(trigger_msg_id, '👀', args.react_url, dry_run=args.dry_run)
@@ -561,6 +745,8 @@ def main():
     p.add_argument('--send-url', default=env_value('ENGINEER_SEND_URL', DEFAULT_SEND_URL, required=True))
     p.add_argument('--react-url', default=env_value('ENGINEER_REACT_URL', DEFAULT_REACT_URL, required=True))
     p.add_argument('--interval', type=float, default=5.0)
+    p.add_argument('--process-keyword-xlsx', default=env_value('ENGINEER_PROCESS_KEYWORD_XLSX'))
+    p.add_argument('--report-dir', default=env_value('ENGINEER_REPORT_DIR', '/home/claw/.openclaw/workspace-engineer-info-structured/reports'))
     p.add_argument('--once', action='store_true')
     p.add_argument('--dry-run', action='store_true')
     args = p.parse_args()
