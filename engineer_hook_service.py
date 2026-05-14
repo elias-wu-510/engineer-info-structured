@@ -303,27 +303,36 @@ def send_reaction(message_id: str | None, emoji: str, react_url: str, dry_run=Fa
         raise RuntimeError(f'Reaction failed: {result}')
 
 
-def send_whatsapp(to: str, message: str, send_url: str, dry_run=False):
-    payload = {'to': to, 'message': message}
+def post_send_api(url: str, payload: dict, dry_run=False, label='SEND API'):
     if dry_run:
-        print('SEND WHATSAPP DRY RUN:')
+        print(f'{label} DRY RUN:')
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     import urllib.request
     data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(send_url, data=data, method='POST')
+    req = urllib.request.Request(url, data=data, method='POST')
     req.add_header('Content-Type', 'application/json; charset=utf-8')
     secret = os.environ.get('SEND_API_SECRET')
     if secret:
         req.add_header('x-api-secret', secret)
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:
         body = resp.read().decode('utf-8')
     try:
         result = json.loads(body)
     except Exception:
         result = {'raw': body}
     if not result.get('ok'):
-        raise RuntimeError(f'WhatsApp send failed: {result}')
+        raise RuntimeError(f'{label} failed: {result}')
+
+
+def send_whatsapp(to: str, message: str, send_url: str, dry_run=False):
+    post_send_api(send_url, {'to': to, 'message': message}, dry_run=dry_run, label='WhatsApp send')
+
+
+def send_whatsapp_image(to: str, image_path: str | Path, send_url: str, caption: str = '', dry_run=False):
+    image_url = str(image_path)
+    image_url_endpoint = send_url.rsplit('/', 1)[0] + '/send-image'
+    post_send_api(image_url_endpoint, {'to': to, 'imageUrl': image_url, 'caption': caption}, dry_run=dry_run, label='WhatsApp image send')
 
 
 def parse_rows_for_summary(log_file: Path, import_state_file: Path, policy_file: Path) -> list[dict]:
@@ -705,6 +714,7 @@ def run_once(args, service_state: dict):
         html_path, png_path = render_process_report(process_rows, report_date, args.report_dir)
         text_summary = build_process_text_summary(process_rows, report_date)
         send_whatsapp(args.target_group, text_summary, args.send_url, dry_run=args.dry_run)
+        send_whatsapp_image(args.target_group, png_path, args.send_url, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
         send_reaction(process_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent process summary to {args.target_group}; files: {html_path}, {png_path}', flush=True)
     elif normal_text:
