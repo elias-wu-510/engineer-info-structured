@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from collections import defaultdict
 import json
 import os
 import re
@@ -626,6 +627,143 @@ def replace_feishu_records(table_id: str, records: list[dict]):
             raise RuntimeError(f'create process records failed: {result}')
 
 
+
+FLOOR_DETAIL_FIELDS = [
+    {'field_name': '日期', 'type': 1, 'is_primary': True},
+    {'field_name': '樓棟', 'type': 1},
+    {'field_name': '樓層', 'type': 1},
+    {'field_name': '分區/位置', 'type': 1},
+    {'field_name': '分判', 'type': 1},
+    {'field_name': '人數', 'type': 2},
+    {'field_name': '工序', 'type': 1},
+    {'field_name': '明細內容', 'type': 1},
+    {'field_name': '排序', 'type': 2},
+]
+
+
+def floor_detail_order(floor: str):
+    s = str(floor or '')
+    if re.search(r'B\d|B/F|B1', s, re.I):
+        return -1
+    if 'G' in s.upper():
+        return 0
+    m = re.search(r'\d+', s)
+    return int(m.group()) if m else 999
+
+
+def build_floor_detail_rows(rows: list[dict], report_date: str) -> list[dict]:
+    building_order = {'A座': 1, 'B座': 2, 'C座': 3, 'Null': 4}
+    out = []
+    for idx, r in enumerate(rows, 1):
+        building = summary_building_label(r.get('樓棟'))
+        floor = (r.get('樓層') or 'null').strip() or 'null'
+        zone = (r.get('分區') or 'null').strip() or 'null'
+        contractor = (r.get('分判') or 'null').strip() or 'null'
+        task = (r.get('工序') or 'null').strip() or 'null'
+        count_raw = str(r.get('人數') or '').strip()
+        count = int(count_raw) if count_raw.isdigit() else 0
+        zone_text = '' if zone.lower() == 'null' else zone
+        task_text = '' if task.lower() == 'null' else task
+        detail = f'{contractor}：{count}人 {zone_text} {task_text}'.replace('  ', ' ').strip()
+        out.append({
+            '日期': report_date,
+            '樓棟': building,
+            '樓層': floor,
+            '分區/位置': zone,
+            '分判': contractor,
+            '人數': count,
+            '工序': task,
+            '明細內容': detail,
+            '排序': building_order.get(building, 9) * 100000 + floor_detail_order(floor) * 100 + idx,
+        })
+    return sorted(out, key=lambda x: (building_order.get(x['樓棟'], 9), floor_detail_order(x['樓層']), x['排序']))
+
+
+def update_floor_detail_table(rows: list[dict], report_date: str) -> tuple[str, str, int]:
+    table_name = '樓層明細表-' + (table_name_from_display_date(report_date) or date.today().isoformat())
+    table_id = ensure_named_feishu_table(table_name, FLOOR_DETAIL_FIELDS)
+    detail_rows = build_floor_detail_rows(rows, report_date)
+    replace_feishu_records(table_id, detail_rows)
+    return table_name, table_id, len(detail_rows)
+
+
+def render_floor_detail_report(rows: list[dict], report_date: str, report_dir: str | None) -> Path:
+    out_dir = Path(report_dir or os.environ.get('ENGINEER_REPORT_DIR') or '/home/claw/.openclaw/workspace-engineer-info-structured/reports')
+    out_dir.mkdir(parents=True, exist_ok=True)
+    iso = table_name_from_display_date(report_date) or date.today().isoformat()
+    png_path = out_dir / f'floor-detail-{iso}.png'
+    grouped = {b: defaultdict(list) for b in BUILDING_SUMMARY_ORDER}
+    for r in rows:
+        building = summary_building_label(r.get('樓棟'))
+        if building not in grouped:
+            building = 'Null'
+        floor = (r.get('樓層') or '未標明樓層').strip() or '未標明樓層'
+        contractor = (r.get('分判') or '未標明分判').strip()
+        count = str(r.get('人數') or '').strip()
+        zone = (r.get('分區') or '').strip()
+        task = (r.get('工序') or '').strip()
+        zone_text = '' if not zone or zone.lower() == 'null' else zone + ' '
+        task_text = '' if not task or task.lower() == 'null' else task
+        count_text = f'{count}人' if count.isdigit() else ''
+        grouped[building][floor].append(f'{contractor}：{count_text} {zone_text}{task_text}'.strip())
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        font_candidates = ['/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc']
+        bold_candidates = ['/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc', '/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc']
+        def get_font(size, bold=False):
+            for fp in (bold_candidates if bold else font_candidates):
+                if Path(fp).exists():
+                    return ImageFont.truetype(fp, size)
+            return ImageFont.load_default()
+        title_font, head_font, floor_font, font = get_font(36, True), get_font(25, True), get_font(22, True), get_font(19)
+        width, margin, gap = 1800, 28, 16
+        col_width = (width - margin * 2 - gap * 3) // 4
+        def wrap(text, max_chars=19):
+            lines, cur = [], ''
+            for ch in str(text):
+                cur += ch
+                if len(cur) >= max_chars:
+                    lines.append(cur); cur = ''
+            if cur: lines.append(cur)
+            return lines or ['']
+        columns, heights = [], []
+        for building in BUILDING_SUMMARY_ORDER:
+            blocks, h = [], 58
+            if not grouped[building]:
+                blocks.append(('今日無工地記錄。', [])); h += 40
+            else:
+                for floor in sorted(grouped[building], key=floor_detail_order):
+                    lines = []
+                    for item in grouped[building][floor]:
+                        lines.extend(wrap('• ' + item))
+                    blocks.append((floor, lines)); h += 34 + len(lines) * 25 + 14
+            columns.append(blocks); heights.append(h)
+        height = 100 + max(heights or [120]) + 40
+        image = Image.new('RGB', (width, height), (245, 245, 240))
+        draw = ImageDraw.Draw(image)
+        draw.text((margin, 22), f'樓層明細表 {report_date}', font=title_font, fill=(20, 20, 20))
+        colors = {'A座': (231, 242, 255), 'B座': (236, 255, 236), 'C座': (255, 244, 230), 'Null': (240, 240, 240)}
+        titles = {'A座': 'A座（Block A）', 'B座': 'B座（Block B）', 'C座': 'C座（Block C）', 'Null': 'Null'}
+        for i, building in enumerate(BUILDING_SUMMARY_ORDER):
+            x = margin + i * (col_width + gap); y = 86
+            draw.rounded_rectangle([x, y, x + col_width, height - 26], radius=16, fill=colors[building], outline=(80, 80, 80), width=2)
+            draw.rectangle([x, y, x + col_width, y + 48], fill=(45, 45, 45))
+            draw.text((x + 14, y + 9), titles[building], font=head_font, fill='white')
+            y += 60
+            for floor, lines in columns[i]:
+                if lines:
+                    draw.text((x + 14, y), str(floor), font=floor_font, fill=(0, 70, 130)); y += 30
+                    for line in lines:
+                        draw.text((x + 18, y), line, font=font, fill=(25, 25, 25)); y += 25
+                    y += 12
+                else:
+                    draw.text((x + 14, y), floor, font=font, fill=(90, 90, 90)); y += 40
+        image.save(png_path)
+    except Exception as e:
+        print(f'WARN: floor detail png render failed: {e}', flush=True)
+        png_path.write_bytes(b'')
+    return png_path
+
 def render_process_report(rows: list[dict], report_date: str, report_dir: str | None) -> tuple[Path, Path]:
     out_dir = Path(report_dir or os.environ.get('ENGINEER_REPORT_DIR') or '/home/claw/.openclaw/workspace-engineer-info-structured/reports')
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -753,12 +891,18 @@ def run_once(args, service_state: dict):
         except Exception as e:
             print(f'WARN: summary read from Feishu failed, fallback to log parse: {e}', flush=True)
             rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
+        report_date = requested_date or date.today().strftime('%d/%m/%Y')
         summaries = build_summary_messages(rows, requested_date=requested_date)
         for summary in summaries:
             send_whatsapp(args.target_group, summary, args.send_url, dry_run=args.dry_run)
             time.sleep(0.2)
+        if not args.dry_run:
+            table_name, table_id, detail_count = update_floor_detail_table(rows, report_date)
+            print(f'Updated Feishu floor detail table {table_name} {table_id} rows={detail_count}', flush=True)
+        floor_png_path = render_floor_detail_report(rows, report_date, args.report_dir)
+        send_whatsapp_image(args.target_group, floor_png_path, args.send_url, caption=f'樓層明細表 {report_date}', dry_run=args.dry_run)
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
-        print(f'Sent {len(summaries)} WhatsApp summary messages to {args.target_group}', flush=True)
+        print(f'Sent {len(summaries)} WhatsApp summary messages and floor detail image to {args.target_group}', flush=True)
 
     # A pure summary trigger should not start Feishu import; otherwise the importer
     # reparses old log content around the trigger and can duplicate historical rows.
