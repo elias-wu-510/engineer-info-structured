@@ -613,7 +613,7 @@ def replace_feishu_records(table_id: str, records: list[dict]):
             for k, v in r.items():
                 if k == '日期' and not v:
                     continue
-                if k == '人數':
+                if k in {'人數', '排序'}:
                     try:
                         fields[k] = int(v or 0)
                     except Exception:
