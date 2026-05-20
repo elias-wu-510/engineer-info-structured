@@ -916,12 +916,18 @@ def run_once(args, service_state: dict):
         def _run_worker():
             try:
                 feishu_import_worker(log_file, worker_args)
+                while service_state.pop('feishu_import_pending', False):
+                    pending_log = latest_log_or_none(Path(worker_args.log_dir)) or log_file
+                    print(f'Running pending Feishu import for {pending_log.name}', flush=True)
+                    feishu_import_worker(pending_log, worker_args)
             finally:
                 service_state['feishu_import_running'] = False
                 service_state.pop('feishu_import_log', None)
+                service_state.pop('feishu_import_pending', None)
         threading.Thread(target=_run_worker, name='feishu-import-worker', daemon=True).start()
     elif new_text:
-        print(f'Feishu import already running for {service_state.get("feishu_import_log")}', flush=True)
+        service_state['feishu_import_pending'] = True
+        print(f'Feishu import already running for {service_state.get("feishu_import_log")}; marked pending rerun', flush=True)
     return service_state
 
 
