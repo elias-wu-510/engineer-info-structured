@@ -90,6 +90,8 @@ def extract_messages(log_path: Path):
                 # before the next [LOG] line; do not swallow those wrapper lines into
                 # the previous message, or the next message can be parsed twice.
                 if INSP_BOT_METADATA_RE.match(line):
+                    messages.append(current)
+                    current = None
                     continue
                 current["text"] += "\n" + line
 
