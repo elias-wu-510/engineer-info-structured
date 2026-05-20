@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import threading
 import time
 import html
@@ -122,15 +123,42 @@ def contains_process_summary_trigger(text: str) -> bool:
     return content is not None
 
 
-def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, dry_run=False):
+def parse_rows_from_log_text(log_name: str, text: str, start_time=None, policy=None) -> list[dict]:
+    """Parse rows from a newly appended insp-bot log fragment.
+
+    The legacy parser expects a file and already has the robust WhatsApp log
+    boundary handling we need (sender DEBUG line, [LOG] line, multiline message
+    continuations, and metadata boundaries).  Write only the appended fragment to
+    a temporary .log so normal imports avoid reparsing the whole daily log.
+    """
+    if not text:
+        return []
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', suffix=f'-{Path(log_name).name}', delete=False) as tmp:
+        tmp.write(text)
+        tmp_path = Path(tmp.name)
+    try:
+        return parse_rows_from_log(tmp_path, start_time=start_time, policy=policy)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, dry_run=False, log_text: str | None = None):
     import_start = time.monotonic()
     import_state = load_import_state(import_state_file)
     policy = load_policy(policy_file)
     start_time = parse_start_time(import_state.get('startTime'))
-    rows = parse_rows_from_log(log_file, start_time=start_time, policy=policy)
+    if log_text is None:
+        rows = parse_rows_from_log(log_file, start_time=start_time, policy=policy)
+        source_label = f'full log {log_file.name}'
+    else:
+        rows = parse_rows_from_log_text(log_file.name, log_text, start_time=start_time, policy=policy)
+        source_label = f'incremental chunk from {log_file.name} chars={len(log_text)}'
     imported = set(import_state.get('imported', []))
     new_rows = [row for row in rows if row_fingerprint(row) not in imported]
-    print(f'Feishu import parsed rows={len(rows)} new_rows={len(new_rows)} elapsed={time.monotonic() - import_start:.2f}s', flush=True)
+    print(f'Feishu import parsed source={source_label} rows={len(rows)} new_rows={len(new_rows)} elapsed={time.monotonic() - import_start:.2f}s', flush=True)
     if not new_rows:
         return 0, rows, []
     if not dry_run:
@@ -828,11 +856,12 @@ def build_process_text_summary(rows: list[dict], report_date: str) -> str:
     lines.append(f'總計：{sum(totals.values())}人；工序項目：{len(rows)}項')
     return '\n'.join(lines)
 
-def feishu_import_worker(log_file: Path, args):
+def feishu_import_worker(log_file: Path, args, log_text: str | None = None):
     try:
         ensure_daily_table()
-        print(f'Feishu import worker start for {log_file.name} table={os.environ.get("FEISHU_BITABLE_TABLE_ID")}', flush=True)
-        created, rows, new_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run)
+        source = 'full log' if log_text is None else f'incremental chunk chars={len(log_text)}'
+        print(f'Feishu import worker start for {log_file.name} source={source} table={os.environ.get("FEISHU_BITABLE_TABLE_ID")}', flush=True)
+        created, rows, new_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run, log_text=log_text)
         if created:
             print(f'Imported {created} new rows from {log_file.name}', flush=True)
         print(f'Feishu import worker done for {log_file.name}', flush=True)
@@ -909,25 +938,33 @@ def run_once(args, service_state: dict):
     if new_text and summary_triggered:
         print('Skipping Feishu import for summary trigger batch', flush=True)
     elif new_text and not service_state.get('feishu_import_running'):
-        print(f'Scheduling Feishu import for {log_file.name}', flush=True)
+        print(f'Scheduling incremental Feishu import for {log_file.name} chars={len(new_text)}', flush=True)
         service_state['feishu_import_running'] = True
         service_state['feishu_import_log'] = str(log_file)
         worker_args = args
+        worker_text = new_text
         def _run_worker():
             try:
-                feishu_import_worker(log_file, worker_args)
+                feishu_import_worker(log_file, worker_args, log_text=worker_text)
                 while service_state.pop('feishu_import_pending', False):
                     pending_log = latest_log_or_none(Path(worker_args.log_dir)) or log_file
-                    print(f'Running pending Feishu import for {pending_log.name}', flush=True)
-                    feishu_import_worker(pending_log, worker_args)
+                    pending_text = service_state.pop('feishu_import_pending_text', '')
+                    if pending_text:
+                        print(f'Running pending incremental Feishu import for {pending_log.name} chars={len(pending_text)}', flush=True)
+                        feishu_import_worker(pending_log, worker_args, log_text=pending_text)
+                    else:
+                        print(f'Running pending Feishu full-log fallback for {pending_log.name}', flush=True)
+                        feishu_import_worker(pending_log, worker_args)
             finally:
                 service_state['feishu_import_running'] = False
                 service_state.pop('feishu_import_log', None)
                 service_state.pop('feishu_import_pending', None)
+                service_state.pop('feishu_import_pending_text', None)
         threading.Thread(target=_run_worker, name='feishu-import-worker', daemon=True).start()
     elif new_text:
         service_state['feishu_import_pending'] = True
-        print(f'Feishu import already running for {service_state.get("feishu_import_log")}; marked pending rerun', flush=True)
+        service_state['feishu_import_pending_text'] = service_state.get('feishu_import_pending_text', '') + new_text
+        print(f'Feishu import already running for {service_state.get("feishu_import_log")}; queued pending incremental chars={len(service_state.get("feishu_import_pending_text", ""))}', flush=True)
     return service_state
 
 
@@ -969,6 +1006,7 @@ def main():
             # Runtime thread flags are process-local; do not persist them across restarts.
             persisted_state.pop('feishu_import_running', None)
             persisted_state.pop('feishu_import_log', None)
+            persisted_state.pop('feishu_import_pending_text', None)
             save_json(state_path, persisted_state)
         except Exception as e:
             print(f'ERROR: {e}', file=sys.stderr, flush=True)
