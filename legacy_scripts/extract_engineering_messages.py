@@ -5,6 +5,7 @@ from pathlib import Path
 
 LOG_LINE_RE = re.compile(r"^\[(?P<ts>[^\]]+)\] \[LOG\] 文本消息内容: (?P<content>.*)$")
 DEBUG_SENDER_RE = re.compile(r"^\[(?P<ts>[^\]]+)\] \[DEBUG 发送人的number, name, pushname分别是\]\s*(?P<number>\S+)?\s*(?P<name>\S+)?\s*(?P<pushname>.*)$")
+INSP_BOT_METADATA_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] (?:重新强制获取消息|收到消息，|\[DEBUG )")
 
 ENGINEERING_HINTS = [
     "Block", "Blk", "座", "棟", "楼", "樓", "/F", "M/F", "zone", "Zone", "扎鐵", "撘架",
@@ -84,6 +85,12 @@ def extract_messages(log_path: Path):
                 pending_sender = None
                 pending_sender_number = None
             elif current is not None:
+                # Multi-line WhatsApp message content continues as plain lines after
+                # the [LOG] line. insp-bot metadata for the next message also appears
+                # before the next [LOG] line; do not swallow those wrapper lines into
+                # the previous message, or the next message can be parsed twice.
+                if INSP_BOT_METADATA_RE.match(line):
+                    continue
                 current["text"] += "\n" + line
 
     if current is not None:
