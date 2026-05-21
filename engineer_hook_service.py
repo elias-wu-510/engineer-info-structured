@@ -497,7 +497,7 @@ def list_feishu_records(app_token: str, table_id: str, token: str) -> list[dict]
     return records
 
 
-def parse_rows_for_summary_from_feishu(requested_date: str | None = None) -> list[dict]:
+def parse_rows_for_summary_from_feishu(requested_date: str | None = None, filter_record_date: bool = True) -> list[dict]:
     app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
     token = get_tenant_access_token()
     if requested_date:
@@ -522,7 +522,7 @@ def parse_rows_for_summary_from_feishu(requested_date: str | None = None) -> lis
         row = {k: str(fields.get(k, 'null') if fields.get(k, '') != '' else 'null') for k in [
             '發布用戶', '發送時間', '日期', '分區', '樓棟', '樓層', '分判', '工序', '人數', '原始消息'
         ]}
-        if requested_date and display_record_date(row.get('日期')) != requested_date:
+        if requested_date and filter_record_date and display_record_date(row.get('日期')) != requested_date:
             continue
         rows.append(row)
     return merge_same_work_rows(rows)
@@ -624,7 +624,7 @@ def ensure_named_feishu_table(name: str, fields: list[dict]) -> str:
     return table_id
 
 
-def replace_feishu_records(table_id: str, records: list[dict]):
+def replace_feishu_records(table_id: str, records: list[dict], numeric_fields: set[str] | None = None):
     app_token = os.environ['FEISHU_BITABLE_APP_TOKEN']
     token = get_tenant_access_token()
     for item in list_feishu_records(app_token, table_id, token):
@@ -642,7 +642,7 @@ def replace_feishu_records(table_id: str, records: list[dict]):
             for k, v in r.items():
                 if k == '日期' and not v:
                     continue
-                if k in {'人數', '排序'}:
+                if numeric_fields and k in numeric_fields:
                     try:
                         fields[k] = int(v or 0)
                     except Exception:
@@ -711,7 +711,7 @@ def update_floor_detail_table(rows: list[dict], report_date: str) -> tuple[str, 
     table_name = '樓層明細表-' + (table_name_from_display_date(report_date) or date.today().isoformat())
     table_id = ensure_named_feishu_table(table_name, FLOOR_DETAIL_FIELDS)
     detail_rows = build_floor_detail_rows(rows, report_date)
-    replace_feishu_records(table_id, detail_rows)
+    replace_feishu_records(table_id, detail_rows, numeric_fields={'人數', '排序'})
     return table_name, table_id, len(detail_rows)
 
 
@@ -889,7 +889,7 @@ def run_once(args, service_state: dict):
         print(f'Process summary trigger detected in {log_file.name}: {process_msg_id or "no-msg-id"} requested_date={requested_date or "today"}', flush=True)
         send_reaction(process_msg_id, '👀', args.react_url, dry_run=args.dry_run)
         try:
-            rows = parse_rows_for_summary_from_feishu(requested_date=requested_date)
+            rows = parse_rows_for_summary_from_feishu(requested_date=requested_date, filter_record_date=False)
             print(f'Process summary loaded {len(rows)} rows from Feishu table', flush=True)
         except Exception as e:
             print(f'WARN: process summary read from Feishu failed, fallback to log parse: {e}', flush=True)
@@ -898,7 +898,7 @@ def run_once(args, service_state: dict):
         table_name = '工序人數表-' + (table_name_from_display_date(report_date) or date.today().isoformat())
         if not args.dry_run:
             table_id = ensure_named_feishu_table(table_name, PROCESS_TABLE_FIELDS)
-            replace_feishu_records(table_id, [{**r, '日期': report_date} for r in process_rows])
+            replace_feishu_records(table_id, [{**r, '日期': report_date} for r in process_rows], numeric_fields=set())
             print(f'Updated Feishu process table {table_name} rows={len(process_rows)}', flush=True)
         else:
             print(f'DRY RUN: would update Feishu process table {table_name} rows={len(process_rows)}', flush=True)
