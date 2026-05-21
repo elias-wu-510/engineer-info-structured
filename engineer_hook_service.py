@@ -568,11 +568,11 @@ def normalize_process(task: str, keywords: list[str]) -> str:
     return raw
 
 
-def aggregate_process_headcount(rows: list[dict], requested_date: str | None, keyword_path: str | None) -> list[dict]:
+def aggregate_process_headcount(rows: list[dict], requested_date: str | None, keyword_path: str | None, filter_record_date: bool = True) -> list[dict]:
     keywords = load_process_keywords(keyword_path)
     grouped = {}
     for r in rows:
-        if requested_date and display_record_date(r.get('日期')) != requested_date:
+        if requested_date and filter_record_date and display_record_date(r.get('日期')) != requested_date:
             continue
         building = summary_building_label(r.get('樓棟'))
         process = normalize_process(r.get('工序'), keywords)
@@ -894,7 +894,7 @@ def run_once(args, service_state: dict):
         except Exception as e:
             print(f'WARN: process summary read from Feishu failed, fallback to log parse: {e}', flush=True)
             rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
-        process_rows = aggregate_process_headcount(rows, requested_date, args.process_keyword_xlsx)
+        process_rows = aggregate_process_headcount(rows, requested_date, args.process_keyword_xlsx, filter_record_date=False)
         table_name = '工序人數表-' + (table_name_from_display_date(report_date) or date.today().isoformat())
         if not args.dry_run:
             table_id = ensure_named_feishu_table(table_name, PROCESS_TABLE_FIELDS)
