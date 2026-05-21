@@ -915,23 +915,40 @@ def run_once(args, service_state: dict):
         print(f'Summary trigger detected in {log_file.name}: {trigger_msg_id or "no-msg-id"} requested_date={requested_date or "all"}', flush=True)
         send_reaction(trigger_msg_id, '👀', args.react_url, dry_run=args.dry_run)
         try:
-            rows = parse_rows_for_summary_from_feishu(requested_date=requested_date)
+            rows = parse_rows_for_summary_from_feishu(requested_date=requested_date, filter_record_date=False)
             print(f'Summary loaded {len(rows)} rows from Feishu table', flush=True)
         except Exception as e:
             print(f'WARN: summary read from Feishu failed, fallback to log parse: {e}', flush=True)
             rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
         report_date = requested_date or date.today().strftime('%d/%m/%Y')
-        summaries = build_summary_messages(rows, requested_date=requested_date)
+
+        # 1) Text summary split by A/B/C/Null.
+        summaries = build_summary_messages(rows, requested_date=None)
         for summary in summaries:
             send_whatsapp(args.target_group, summary, args.send_url, dry_run=args.dry_run)
             time.sleep(0.2)
+
+        # 2) Floor detail Feishu table + WhatsApp image.
         if not args.dry_run:
             table_name, table_id, detail_count = update_floor_detail_table(rows, report_date)
             print(f'Updated Feishu floor detail table {table_name} {table_id} rows={detail_count}', flush=True)
         floor_png_path = render_floor_detail_report(rows, report_date, args.report_dir)
         send_whatsapp_image(args.target_group, floor_png_path, args.send_url, caption=f'樓層明細表 {report_date}', dry_run=args.dry_run)
+
+        # 3) Process headcount Feishu table + text summary + WhatsApp image.
+        process_rows = aggregate_process_headcount(rows, report_date, args.process_keyword_xlsx, filter_record_date=False)
+        process_table_name = '工序人數表-' + (table_name_from_display_date(report_date) or date.today().isoformat())
+        if not args.dry_run:
+            process_table_id = ensure_named_feishu_table(process_table_name, PROCESS_TABLE_FIELDS)
+            replace_feishu_records(process_table_id, [{**r, '日期': report_date} for r in process_rows], numeric_fields=set())
+            print(f'Updated Feishu process table {process_table_name} rows={len(process_rows)}', flush=True)
+        process_html_path, process_png_path = render_process_report(process_rows, report_date, args.report_dir)
+        process_text_summary = build_process_text_summary(process_rows, report_date)
+        send_whatsapp(args.target_group, process_text_summary, args.send_url, dry_run=args.dry_run)
+        send_whatsapp_image(args.target_group, process_png_path, args.send_url, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
+
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
-        print(f'Sent {len(summaries)} WhatsApp summary messages and floor detail image to {args.target_group}', flush=True)
+        print(f'Sent text summaries, floor detail, and process report to {args.target_group}', flush=True)
 
     # A pure summary trigger should not start Feishu import; otherwise the importer
     # reparses old log content around the trigger and can duplicate historical rows.
