@@ -198,6 +198,14 @@ def fill_worker_type(row: dict) -> dict:
         for token in ['搭棚工', '棚工', '男工', '女工', '外勞', '焊工']:
             contractor = contractor.replace(token, '')
         out['分判'] = contractor.strip() or out.get('分判')
+
+    # Common parser split error: "利安 打lift膽石矢 1人" may be split as
+    # 分判=利安 打lift膽, 工序=石矢.  Keep company in 分判 and merge the rest into 工序.
+    contractor = str(out.get('分判') or '').strip()
+    task = str(out.get('工序') or '').strip()
+    if contractor == '利安 打lift膽' and task == '石矢':
+        out['分判'] = '利安'
+        out['工序'] = '打lift膽石矢'
     return out
 
 
