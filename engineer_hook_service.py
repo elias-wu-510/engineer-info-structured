@@ -186,7 +186,7 @@ def fill_worker_type(row: dict) -> dict:
     if str(out.get('工種') or '').strip() and str(out.get('工種')).lower() != 'null':
         return out
     out['工種'] = ''
-    haystack = ' '.join(str(out.get(k) or '') for k in ['分判', '工序', '原始消息'])
+    haystack = ' '.join(str(out.get(k) or '') for k in ['分判', '工序'])
     worker = None
     for candidate in ['搭棚工', '棚工', '男工', '女工', '外勞', '焊工']:
         if candidate in haystack:
