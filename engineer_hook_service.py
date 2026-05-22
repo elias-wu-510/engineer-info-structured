@@ -179,6 +179,30 @@ def upload_rows_grouped_by_record_date(rows: list[dict], token: str) -> int:
             os.environ['FEISHU_BITABLE_TABLE_ID'] = original_table
     return total
 
+
+def fill_worker_type(row: dict) -> dict:
+    """Infer 工種 from contractor/task/raw text for worker-type phrases."""
+    out = dict(row)
+    if str(out.get('工種') or '').strip() and str(out.get('工種')).lower() != 'null':
+        return out
+    haystack = ' '.join(str(out.get(k) or '') for k in ['分判', '工序', '原始消息'])
+    worker = None
+    for candidate in ['搭棚工', '棚工', '男工', '女工', '外勞', '焊工']:
+        if candidate in haystack:
+            worker = '棚工' if candidate == '搭棚工' else candidate
+            break
+    if worker:
+        out['工種'] = worker
+        contractor = str(out.get('分判') or '')
+        for token in ['搭棚工', '棚工', '男工', '女工', '外勞', '焊工']:
+            contractor = contractor.replace(token, '')
+        out['分判'] = contractor.strip() or out.get('分判')
+    return out
+
+
+def fill_worker_types(rows: list[dict]) -> list[dict]:
+    return [fill_worker_type(r) for r in rows]
+
 def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, dry_run=False, log_text: str | None = None):
     import_start = time.monotonic()
     import_state = load_import_state(import_state_file)
@@ -191,6 +215,7 @@ def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, 
         rows = parse_rows_from_log_text(log_file.name, log_text, start_time=start_time, policy=policy)
         source_label = f'incremental chunk from {log_file.name} chars={len(log_text)}'
     imported = set(import_state.get('imported', []))
+    rows = fill_worker_types(rows)
     new_rows = [row for row in rows if row_fingerprint(row) not in imported]
     print(f'Feishu import parsed source={source_label} rows={len(rows)} new_rows={len(new_rows)} elapsed={time.monotonic() - import_start:.2f}s', flush=True)
     if not new_rows:
