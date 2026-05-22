@@ -48,6 +48,17 @@ def is_valid_contractor(value: str | None) -> bool:
 
 
 ROLE_SUFFIX_RE = re.compile(r"(?:墨斗工|焊工|炮手|男工|女工|工人|師傅)$")
+WORKER_TYPE_RE = re.compile(r"(男工|女工)")
+
+
+def split_worker_type(value: str | None) -> tuple[str, str | None]:
+    raw = clean_task(value or "")
+    m = WORKER_TYPE_RE.search(raw)
+    if not m:
+        return raw, None
+    worker_type = m.group(1)
+    contractor = clean_task((raw[:m.start()] + raw[m.end():]).strip())
+    return contractor, worker_type
 
 
 def normalize_contractor_name(value: str | None) -> str:
@@ -666,6 +677,24 @@ def parse_segment(seg: dict):
     pending_floor = None
     pending_task_line = None
 
+    def make_row(inline_row: dict, row_floor: str | None) -> dict:
+        contractor, worker_type = split_worker_type(inline_row.get("分判"))
+        contractor = normalize_contractor_name(contractor)
+        return {
+            "發布用戶": seg["發布用戶"],
+            "發送人號碼": seg.get("發送人號碼", "null"),
+            "發送時間": seg["發送時間"],
+            "日期": context["日期"] or "null",
+            "分區": inline_row.get("分區") or context["分區"] or "null",
+            "樓棟": context["樓棟"] or "null",
+            "樓層": row_floor or "null",
+            "分判": contractor or "null",
+            "工種": inline_row.get("工種") or worker_type or "null",
+            "工序": final_clean_task(inline_row["工序"], context.get("樓棟")),
+            "人數": inline_row["人數"],
+            "原始消息": body,
+        }
+
     for line in lines:
         line = strip_list_marker(line)
         if any(hint in line for hint in IGNORE_TASK_HINTS):
@@ -673,19 +702,7 @@ def parse_segment(seg: dict):
             continue
         pending_colon = parse_colon_headcount_with_pending(line, pending_task_line)
         if pending_colon:
-            rows.append({
-                "發布用戶": seg["發布用戶"],
-                "發送人號碼": seg.get("發送人號碼", "null"),
-                "發送時間": seg["發送時間"],
-                "日期": context["日期"] or "null",
-                "分區": pending_colon.get("分區") or context["分區"] or "null",
-                "樓棟": context["樓棟"] or "null",
-                "樓層": pending_colon.get("樓層") or context["樓層"] or "null",
-                "分判": pending_colon["分判"],
-                "工序": final_clean_task(pending_colon["工序"], context.get("樓棟")),
-                "人數": pending_colon["人數"],
-                "原始消息": body,
-            })
+            rows.append(make_row(pending_colon, pending_colon.get("樓層") or context["樓層"]))
             pending_task_line = None
             continue
 
@@ -784,19 +801,7 @@ def parse_segment(seg: dict):
             for inline_row in inline_rows:
                 if is_valid_contractor(inline_row.get("分判")):
                     current_contractor = inline_row.get("分判")
-                rows.append({
-                    "發布用戶": seg["發布用戶"],
-                    "發送人號碼": seg.get("發送人號碼", "null"),
-                    "發送時間": seg["發送時間"],
-                    "日期": context["日期"] or "null",
-                    "分區": inline_row.get("分區") or context["分區"] or "null",
-                    "樓棟": context["樓棟"] or "null",
-                    "樓層": row_floor or "null",
-                    "分判": inline_row["分判"],
-                    "工序": final_clean_task(inline_row["工序"], context.get("樓棟")),
-                    "人數": inline_row["人數"],
-                    "原始消息": body,
-                })
+                rows.append(make_row(inline_row, row_floor))
             pending_task_line = None
         elif (
             not HEADCOUNT_RE.search(line)
