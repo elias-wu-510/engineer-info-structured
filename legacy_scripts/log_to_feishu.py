@@ -21,7 +21,7 @@ CONTRACTOR_HEADING_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z0-9·•\-~  ]{1,20}
 KNOWN_CONTRACTORS = [
     "陳橋", "藝薪", "藝新", "日麗雅", "明泰", "順利", "萬通", "偉健", "利安", "秦深记", "美時",
     "中機電", "遠東德鴻", "捷信", "駿慶", "萬利", "力成", "仙壁", "康和", "恆昇", "恒記",
-    "浩洲", "新豪", "鉅城", "永興", "安全外勞", "安全外",
+    "浩洲", "新豪", "鉅城", "永興", "好標準", "中建", "安全外勞", "安全外",
 ]
 
 KNOWN_TASKS = [
@@ -48,7 +48,7 @@ def is_valid_contractor(value: str | None) -> bool:
 
 
 ROLE_SUFFIX_RE = re.compile(r"(?:墨斗工|焊工|炮手|男工|女工|工人|師傅)$")
-WORKER_TYPE_RE = re.compile(r"(男工|女工)")
+WORKER_TYPE_RE = re.compile(r"(搭棚工|棚工|男工|女工|外勞|焊工)")
 
 
 def split_worker_type(value: str | None) -> tuple[str, str | None]:
@@ -56,7 +56,11 @@ def split_worker_type(value: str | None) -> tuple[str, str | None]:
     m = WORKER_TYPE_RE.search(raw)
     if not m:
         return raw, None
+    if raw == m.group(1):
+        return raw, None
     worker_type = m.group(1)
+    if worker_type == "搭棚工":
+        worker_type = "棚工"
     contractor = clean_task((raw[:m.start()] + raw[m.end():]).strip())
     return contractor, worker_type
 
@@ -384,14 +388,15 @@ def parse_colon_form(line: str):
     left_count = HEADCOUNT_RE.search(left)
     rest_count = HEADCOUNT_RE.search(rest)
     if left_count:
-        contractor = normalize_contractor_name(left[:left_count.start()])
+        contractor_raw, worker_type = split_worker_type(left[:left_count.start()])
+        contractor = normalize_contractor_name(contractor_raw)
         if not is_valid_contractor(contractor):
             return None
 
         # Form: 順利3人：1人鏟地台、2人清場（Zone4、5）
         counted_items = parse_counted_task_items(rest)
         if counted_items:
-            return [{"分判": contractor, **item} for item in counted_items]
+            return [{"分判": contractor, "工種": worker_type or "null", **item} for item in counted_items]
 
         # Form: 順利6人：BS Opening吊板、鑽窿（Zone4、5）、鏟地台（Zone4）
         count = left_count.group(1)
@@ -400,10 +405,11 @@ def parse_colon_form(line: str):
             zone, task = extract_zone(task_text)
             task = clean_task(task)
             if task:
-                rows.append({"分判": contractor, "工序": task, "人數": count, "分區": zone})
+                rows.append({"分判": contractor, "工種": worker_type or "null", "工序": task, "人數": count, "分區": zone})
         return rows or None
 
-    contractor = normalize_contractor_name(left)
+    contractor_raw, worker_type = split_worker_type(left)
+    contractor = normalize_contractor_name(contractor_raw)
     m = rest_count
     if not is_valid_contractor(contractor) or not m:
         return None
@@ -415,7 +421,7 @@ def parse_colon_form(line: str):
     task = clean_task(task)
     if not task:
         return None
-    return {"分判": contractor, "工序": task, "人數": count, "分區": zone}
+    return {"分判": contractor, "工種": worker_type or "null", "工序": task, "人數": count, "分區": zone}
 
 
 def parse_no_headcount_record(line: str, current_contractor: str | None):
@@ -432,6 +438,7 @@ def parse_no_headcount_record(line: str, current_contractor: str | None):
         contractor = current_contractor
         task = base
     else:
+        return None
         known_contractor, known_task = split_known_contractor(base)
         if known_contractor and known_task:
             contractor = known_contractor
@@ -624,7 +631,13 @@ def split_floor_task_line(line: str):
     text = clean_task(line)
     zone, text_no_zone = extract_zone(text)
     text_no_zone = clean_task(text_no_zone)
-    floor, task = extract_floors(text_no_zone)
+    range_floor = re.search(r"(?P<floor>\d+\s*[-至]\s*(?:G|\d+)樓?)", text_no_zone, re.I)
+    if range_floor:
+        floor = range_floor.group("floor").replace(" ", "")
+        task = clean_task((text_no_zone[:range_floor.start()] + " " + text_no_zone[range_floor.end():]).strip())
+        task = re.sub(r"^至\s*", "", task)
+    else:
+        floor, task = extract_floors(text_no_zone)
     if not floor:
         m2 = re.match(r"^(?P<floor>(?:\d+以上樓|\d+樓[^\s]*|G/[Ff][^\s]*|M/[Ff][^\s]*|B\d+[^\s]*))(?P<task>.+)$", text_no_zone)
         if m2:
@@ -641,13 +654,14 @@ def parse_colon_headcount_with_pending(line: str, pending_task_line: str | None)
     m = re.match(r"^(?P<contractor>.+?)[:：]\s*(?P<count>\d+)人\s*$", line)
     if not m:
         return None
-    contractor = normalize_contractor_name(m.group("contractor"))
+    contractor_raw, worker_type = split_worker_type(m.group("contractor"))
+    contractor = normalize_contractor_name(contractor_raw)
     if not is_valid_contractor(contractor):
         return None
     floor, zone, task = split_floor_task_line(pending_task_line)
     if not task:
         return None
-    return {"分判": contractor, "工序": task, "人數": m.group("count"), "分區": zone, "樓層": floor}
+    return {"分判": contractor, "工種": worker_type or "null", "工序": task, "人數": m.group("count"), "分區": zone, "樓層": floor}
 
 
 
@@ -679,6 +693,7 @@ def parse_segment(seg: dict):
 
     def make_row(inline_row: dict, row_floor: str | None) -> dict:
         contractor, worker_type = split_worker_type(inline_row.get("分判"))
+        task_raw, task_worker_type = split_worker_type(inline_row.get("工序"))
         contractor = normalize_contractor_name(contractor)
         return {
             "發布用戶": seg["發布用戶"],
@@ -689,8 +704,8 @@ def parse_segment(seg: dict):
             "樓棟": context["樓棟"] or "null",
             "樓層": row_floor or "null",
             "分判": contractor or "null",
-            "工種": inline_row.get("工種") or worker_type or "null",
-            "工序": final_clean_task(inline_row["工序"], context.get("樓棟")),
+            "工種": (None if inline_row.get("工種") == "null" else inline_row.get("工種")) or worker_type or task_worker_type or "null",
+            "工序": final_clean_task(task_raw, context.get("樓棟")),
             "人數": inline_row["人數"],
             "原始消息": body,
         }
