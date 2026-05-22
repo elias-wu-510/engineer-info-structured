@@ -396,7 +396,7 @@ def parse_colon_form(line: str):
         # Form: 順利3人：1人鏟地台、2人清場（Zone4、5）
         counted_items = parse_counted_task_items(rest)
         if counted_items:
-            return [{"分判": contractor, "工種": worker_type or "null", **item} for item in counted_items]
+            return [{"分判": contractor, "工種": worker_type or "", **item} for item in counted_items]
 
         # Form: 順利6人：BS Opening吊板、鑽窿（Zone4、5）、鏟地台（Zone4）
         count = left_count.group(1)
@@ -405,7 +405,7 @@ def parse_colon_form(line: str):
             zone, task = extract_zone(task_text)
             task = clean_task(task)
             if task:
-                rows.append({"分判": contractor, "工種": worker_type or "null", "工序": task, "人數": count, "分區": zone})
+                rows.append({"分判": contractor, "工種": worker_type or "", "工序": task, "人數": count, "分區": zone})
         return rows or None
 
     contractor_raw, worker_type = split_worker_type(left)
@@ -421,7 +421,7 @@ def parse_colon_form(line: str):
     task = clean_task(task)
     if not task:
         return None
-    return {"分判": contractor, "工種": worker_type or "null", "工序": task, "人數": count, "分區": zone}
+    return {"分判": contractor, "工種": worker_type or "", "工序": task, "人數": count, "分區": zone}
 
 
 def parse_no_headcount_record(line: str, current_contractor: str | None):
@@ -661,7 +661,7 @@ def parse_colon_headcount_with_pending(line: str, pending_task_line: str | None)
     floor, zone, task = split_floor_task_line(pending_task_line)
     if not task:
         return None
-    return {"分判": contractor, "工種": worker_type or "null", "工序": task, "人數": m.group("count"), "分區": zone, "樓層": floor}
+    return {"分判": contractor, "工種": worker_type or "", "工序": task, "人數": m.group("count"), "分區": zone, "樓層": floor}
 
 
 
@@ -704,7 +704,7 @@ def parse_segment(seg: dict):
             "樓棟": context["樓棟"] or "null",
             "樓層": row_floor or "null",
             "分判": contractor or "null",
-            "工種": (None if inline_row.get("工種") == "null" else inline_row.get("工種")) or worker_type or task_worker_type or "null",
+            "工種": (None if inline_row.get("工種") == "null" else inline_row.get("工種")) or worker_type or task_worker_type or "",
             "工序": final_clean_task(task_raw, context.get("樓棟")),
             "人數": inline_row["人數"],
             "原始消息": body,

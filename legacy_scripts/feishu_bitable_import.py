@@ -73,6 +73,8 @@ def parse_csv_text(csv_text: str) -> list[dict]:
     records = []
     for row in reader:
         fields = {k: (row.get(k, "") or "").strip() for k in CSV_COLUMNS}
+        if fields.get("工種", "").lower() == "null":
+            fields["工種"] = ""
         if not any(fields.values()):
             continue
         headcount = fields["人數"]
