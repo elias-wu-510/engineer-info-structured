@@ -168,6 +168,7 @@ def parse_rows_from_log(log_file: Path, start_time=None, policy=None) -> list[di
                         sender_label or msg.get('sender', 'null'),
                         msg.get('log_ts', 'null'),
                         message_rows,
+                        msg.get('sender_number', 'null'),
                     )
                     if llm_rows:
                         mode_label = 'review' if message_rows else 'fallback'
