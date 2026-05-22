@@ -489,6 +489,19 @@ def send_whatsapp_image(to: str, image_path: str | Path, send_url: str, caption:
     post_send_api(image_url_endpoint, {'to': to, 'imageUrl': image_url, 'caption': caption}, dry_run=dry_run, label='WhatsApp image send')
 
 
+
+
+def send_whatsapp_file(to: str, file_path: str | Path, send_url: str, filename: str | None = None, caption: str = '', dry_run=False):
+    path = Path(file_path)
+    file_endpoint = send_url.rsplit('/', 1)[0] + '/send-file'
+    post_send_api(file_endpoint, {
+        'to': to,
+        'fileUrl': str(path),
+        'filename': filename or path.name,
+        'caption': caption,
+    }, dry_run=dry_run, label='WhatsApp file send')
+
+
 def parse_rows_for_summary(log_file: Path, import_state_file: Path, policy_file: Path) -> list[dict]:
     import_state = load_import_state(import_state_file)
     policy = load_policy(policy_file)
@@ -1038,7 +1051,7 @@ def run_once(args, service_state: dict):
         html_path, png_path = render_process_report(process_rows, report_date, args.report_dir)
         text_summary = build_process_text_summary(process_rows, report_date)
         send_whatsapp(args.target_group, text_summary, args.send_url, dry_run=args.dry_run)
-        send_whatsapp_image(args.target_group, png_path, args.send_url, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
+        send_whatsapp_file(args.target_group, png_path, args.send_url, filename=png_path.name, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
         send_reaction(process_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent process summary to {args.target_group}; files: {html_path}, {png_path}', flush=True)
     elif normal_text:
@@ -1066,7 +1079,7 @@ def run_once(args, service_state: dict):
             table_name, table_id, detail_count = update_floor_detail_table(rows, report_date)
             print(f'Updated Feishu floor detail table {table_name} {table_id} rows={detail_count}', flush=True)
         floor_png_path = render_floor_detail_report(rows, report_date, args.report_dir)
-        send_whatsapp_image(args.target_group, floor_png_path, args.send_url, caption=f'樓層明細表 {report_date}', dry_run=args.dry_run)
+        send_whatsapp_file(args.target_group, floor_png_path, args.send_url, filename=floor_png_path.name, caption=f'樓層明細表 {report_date}', dry_run=args.dry_run)
 
         # 3) Process headcount Feishu table + text summary + WhatsApp image.
         process_rows = aggregate_process_headcount(rows, report_date, args.process_keyword_xlsx, filter_record_date=False)
@@ -1078,7 +1091,7 @@ def run_once(args, service_state: dict):
         process_html_path, process_png_path = render_process_report(process_rows, report_date, args.report_dir)
         process_text_summary = build_process_text_summary(process_rows, report_date)
         send_whatsapp(args.target_group, process_text_summary, args.send_url, dry_run=args.dry_run)
-        send_whatsapp_image(args.target_group, process_png_path, args.send_url, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
+        send_whatsapp_file(args.target_group, process_png_path, args.send_url, filename=process_png_path.name, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
 
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent text summaries, floor detail, and process report to {args.target_group}', flush=True)
