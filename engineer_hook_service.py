@@ -207,6 +207,48 @@ def fill_worker_type(row: dict) -> dict:
         out['分判'] = '利安'
         out['工序'] = '打lift膽石矢'
 
+    raw = str(out.get('原始消息') or '')
+
+    # Keep compound task phrases together when the parser/LLM split them into duplicated rows.
+    task = str(out.get('工序') or '').strip()
+    compound_tasks = [
+        ('做頂槽，做骨', {'做頂槽', '做骨'}),
+        ('封板&頂底槽', {'封板', '頂底槽'}),
+        ('裝燈槽&drywall 暗箱', {'裝燈槽', 'drywall 暗箱'}),
+        ('裝喉&開料', {'裝喉', '開料'}),
+    ]
+    for phrase, parts in compound_tasks:
+        if phrase in raw and task in parts:
+            out['工序'] = phrase
+            break
+
+    # Location words that are part of the task, not zone.
+    if str(out.get('分區') or '').strip() == '牛房' and str(out.get('工序') or '').strip() == '紋框':
+        out['工序'] = '牛房紋框'
+        out['分區'] = ''
+
+    # CP/grid labels are zones.
+    if 'CP1-4 萬利搭架8人' in raw and str(out.get('分判') or '').strip() == '萬利' and str(out.get('工序') or '').strip() == '搭架':
+        out['分區'] = 'CP1-4'
+
+    # GF is a floor, not a zone.
+    if str(out.get('分區') or '').strip().upper() == 'GF':
+        if not str(out.get('樓層') or '').strip() or str(out.get('樓層')).lower() == 'null':
+            out['樓層'] = 'GF'
+        out['分區'] = ''
+
+    # A座B1 means B1 is a zone/area for this B1 basement message.
+    if 'A座B1' in raw and (not str(out.get('分區') or '').strip() or str(out.get('分區')).lower() == 'null'):
+        out['分區'] = 'B1'
+
+    # Contractor with trade in parentheses should remain the contractor name.
+    if '捷信（水喉）' in raw and str(out.get('工序') or '').strip() == '搬存料區':
+        out['分判'] = '捷信'
+
+    # CCTV/camera count before headcount is not the task.
+    if str(out.get('工序') or '').strip() == '1貓':
+        out['工序'] = '清欄板枋'
+
     # If a floor range appears at the start of the task, e.g.
     # "中建外勞：4人 - 10至12樓執場安全執整，地吼止水", move it to 樓層.
     task = str(out.get('工序') or '').strip()
