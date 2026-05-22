@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 import html
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -146,6 +146,39 @@ def parse_rows_from_log_text(log_name: str, text: str, start_time=None, policy=N
             pass
 
 
+
+def iso_table_name_from_record_date(value: str | None) -> str | None:
+    raw = str(value or '').strip()
+    for fmt in ('%d/%m/%Y', '%d-%m-%Y'):
+        try:
+            return datetime.strptime(raw, fmt).date().isoformat()
+        except ValueError:
+            pass
+    return table_name_from_display_date(raw)
+
+
+def upload_rows_grouped_by_record_date(rows: list[dict], token: str) -> int:
+    """Upload rows to daily tables based on row['日期'] instead of today's table."""
+    if not rows:
+        return 0
+    original_table = os.environ.get('FEISHU_BITABLE_TABLE_ID')
+    total = 0
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        table_name = iso_table_name_from_record_date(row.get('日期')) or date.today().isoformat()
+        groups[table_name].append(row)
+    try:
+        for table_name, group_rows in groups.items():
+            table_id = ensure_named_feishu_table(table_name, DAILY_TABLE_FIELDS)
+            os.environ['FEISHU_BITABLE_TABLE_ID'] = table_id
+            records = parse_csv_text(rows_to_csv(group_rows))
+            print(f'Uploading {len(group_rows)} rows to Feishu daily table {table_name} {table_id}', flush=True)
+            total += upload_records(records, token)
+    finally:
+        if original_table:
+            os.environ['FEISHU_BITABLE_TABLE_ID'] = original_table
+    return total
+
 def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, dry_run=False, log_text: str | None = None):
     import_start = time.monotonic()
     import_state = load_import_state(import_state_file)
@@ -170,7 +203,7 @@ def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, 
         token = get_tenant_access_token()
         print(f'Feishu token done elapsed={time.monotonic() - token_start:.2f}s', flush=True)
         upload_start = time.monotonic()
-        created = upload_records(records, token)
+        created = upload_rows_grouped_by_record_date(new_rows, token)
         print(f'Feishu upload_records done created={created} elapsed={time.monotonic() - upload_start:.2f}s', flush=True)
         imported.update(row_fingerprint(r) for r in new_rows)
         import_state['imported'] = sorted(imported)
