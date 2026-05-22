@@ -343,24 +343,49 @@ def build_summary_messages(rows: list[dict], requested_date: str | None = None) 
 
 
 def find_engineering_message_ids(text: str) -> list[str]:
-    """Return msgIds for newly appended log messages that look like engineering records."""
+    """Return msgIds for newly appended log messages that look like engineering records.
+
+    WhatsApp log messages can be multiline: only the first line has the
+    "[LOG] 文本消息内容:" prefix and continuation lines follow raw.  Accumulate
+    the full message before applying the engineering classifier.
+    """
     ids = []
     current_msg_id = None
+    pending_msg_id = None
+    pending_lines: list[str] = []
+
+    def flush_pending():
+        if not pending_msg_id or not pending_lines:
+            return
+        content = "\n".join(pending_lines).strip()
+        try:
+            if looks_like_engineering_message(content):
+                ids.append(pending_msg_id)
+        except Exception:
+            pass
+
     for line in text.splitlines():
         received = RECEIVED_RE.match(line)
         if received:
+            flush_pending()
+            pending_msg_id = None
+            pending_lines = []
             msg_id = received.group('msg_id').strip()
             current_msg_id = msg_id if msg_id and msg_id.lower() != 'undefined' else None
             continue
         m = LOG_MSG_RE.match(line)
-        if not m or not current_msg_id:
+        if m:
+            flush_pending()
+            pending_msg_id = current_msg_id
+            pending_lines = [m.group('content').strip()]
             continue
-        content = m.group('content').strip()
-        try:
-            if looks_like_engineering_message(content):
-                ids.append(current_msg_id)
-        except Exception:
-            pass
+        if pending_msg_id and not line.startswith('['):
+            pending_lines.append(line)
+        elif line.startswith('['):
+            flush_pending()
+            pending_msg_id = None
+            pending_lines = []
+    flush_pending()
     # Preserve order, avoid duplicate reactions for multiline/repeated parser matches.
     return list(dict.fromkeys(ids))
 
