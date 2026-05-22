@@ -502,8 +502,8 @@ DAILY_TABLE_FIELDS = [
         {'name': '捷信'}, {'name': '億雄'}, {'name': '創豐'}, {'name': '秦深記'}, {'name': '好標準'},
         {'name': 'null'},
     ]}},
-    {'field_name': '工種', 'type': 1},
     {'field_name': '工序', 'type': 1},
+    {'field_name': '工種', 'type': 1},
     {'field_name': '人數', 'type': 1},
     {'field_name': '原始消息', 'type': 1},
 ]
@@ -629,7 +629,7 @@ def parse_rows_for_summary_from_feishu(requested_date: str | None = None, filter
     for item in items:
         fields = item.get('fields') or {}
         row = {k: str(fields.get(k, 'null') if fields.get(k, '') != '' else 'null') for k in [
-            '發布用戶', '發送人號碼', '發送時間', '日期', '分區', '樓棟', '樓層', '分判', '工種', '工序', '人數', '原始消息'
+            '發布用戶', '發送人號碼', '發送時間', '日期', '分區', '樓棟', '樓層', '分判', '工序', '工種', '人數', '原始消息'
         ]}
         if requested_date and filter_record_date and display_record_date(row.get('日期')) != requested_date:
             continue
