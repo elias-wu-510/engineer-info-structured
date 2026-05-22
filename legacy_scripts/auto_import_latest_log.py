@@ -157,7 +157,7 @@ def parse_rows_from_log(log_file: Path, start_time=None, policy=None) -> list[di
         parse_text = normalize_structured_text(msg['text']) if trusted_only else msg['text']
         sender_label = policy.get('trustedSenderLabel') if trusted_only else msg.get('sender', 'null')
         message_rows = []
-        for seg in split_segments(parse_text, sender_label or msg.get('sender', 'null'), msg.get('log_ts', 'null')):
+        for seg in split_segments(parse_text, sender_label or msg.get('sender', 'null'), msg.get('log_ts', 'null'), msg.get('sender_number', 'null')):
             message_rows.extend(parse_segment(seg))
         if policy.get('llmFallback', True) and llm_enabled():
             try:
