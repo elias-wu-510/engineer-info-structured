@@ -40,6 +40,7 @@ from auto_import_latest_log import (  # noqa: E402
 )
 from log_to_feishu import rows_to_csv  # noqa: E402
 from feishu_bitable_import import get_tenant_access_token, parse_csv_text, upload_records  # noqa: E402
+from extract_engineering_messages import looks_like_engineering_message  # noqa: E402
 
 
 def load_dotenv(path: Path):
@@ -306,6 +307,29 @@ def build_summary(rows: list[dict], requested_date: str | None = None, building_
 def build_summary_messages(rows: list[dict], requested_date: str | None = None) -> list[str]:
     return [build_summary(rows, requested_date=requested_date, building_filter=building) for building in BUILDING_SUMMARY_ORDER]
 
+
+
+def find_engineering_message_ids(text: str) -> list[str]:
+    """Return msgIds for newly appended log messages that look like engineering records."""
+    ids = []
+    current_msg_id = None
+    for line in text.splitlines():
+        received = RECEIVED_RE.match(line)
+        if received:
+            msg_id = received.group('msg_id').strip()
+            current_msg_id = msg_id if msg_id and msg_id.lower() != 'undefined' else None
+            continue
+        m = LOG_MSG_RE.match(line)
+        if not m or not current_msg_id:
+            continue
+        content = m.group('content').strip()
+        try:
+            if looks_like_engineering_message(content):
+                ids.append(current_msg_id)
+        except Exception:
+            pass
+    # Preserve order, avoid duplicate reactions for multiline/repeated parser matches.
+    return list(dict.fromkeys(ids))
 
 def send_reaction(message_id: str | None, emoji: str, react_url: str, dry_run=False):
     if not message_id:
@@ -865,6 +889,12 @@ def feishu_import_worker(log_file: Path, args, log_text: str | None = None):
         created, rows, new_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run, log_text=log_text)
         if created:
             print(f'Imported {created} new rows from {log_file.name}', flush=True)
+            if log_text:
+                for msg_id in find_engineering_message_ids(log_text):
+                    try:
+                        send_reaction(msg_id, '✅', args.react_url, dry_run=args.dry_run)
+                    except Exception as react_exc:
+                        print(f'WARN: imported-row reaction failed for {msg_id}: {react_exc}', flush=True)
         print(f'Feishu import worker done for {log_file.name}', flush=True)
     except Exception as e:
         print(f'ERROR: Feishu import worker failed for {log_file.name}: {e}', file=sys.stderr, flush=True)
