@@ -77,12 +77,12 @@ def split_segments(text: str, group_sender: str = "null", group_sent_time: str =
             body_lines = [m.group("body")] + rest
             yield {
                 "發布用戶": group_sender or "null",
-                "发送人号码": group_sender_number or "null",
+                "發送人號碼": group_sender_number or "null",
                 "發送時間": group_sent_time or "null",
                 "body": "\n".join(body_lines).strip(),
             }
         else:
-            yield {"發布用戶": group_sender or "null", "发送人号码": group_sender_number or "null", "發送時間": group_sent_time or "null", "body": raw.strip()}
+            yield {"發布用戶": group_sender or "null", "發送人號碼": group_sender_number or "null", "發送時間": group_sent_time or "null", "body": raw.strip()}
 
 
 def normalize_building(value: str | None):
@@ -656,7 +656,7 @@ def parse_segment(seg: dict):
         if pending_colon:
             rows.append({
                 "發布用戶": seg["發布用戶"],
-                "发送人号码": seg.get("发送人号码", "null"),
+                "發送人號碼": seg.get("發送人號碼", "null"),
                 "發送時間": seg["發送時間"],
                 "日期": context["日期"] or "null",
                 "分區": pending_colon.get("分區") or context["分區"] or "null",
@@ -756,7 +756,7 @@ def parse_segment(seg: dict):
                     current_contractor = inline_row.get("分判")
                 rows.append({
                     "發布用戶": seg["發布用戶"],
-                    "发送人号码": seg.get("发送人号码", "null"),
+                    "發送人號碼": seg.get("發送人號碼", "null"),
                     "發送時間": seg["發送時間"],
                     "日期": context["日期"] or "null",
                     "分區": inline_row.get("分區") or context["分區"] or "null",
