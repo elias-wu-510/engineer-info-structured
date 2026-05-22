@@ -140,6 +140,7 @@ def normalize_date(text: str | None):
 
 
 def clean_task(text: str) -> str:
+    text = re.sub(r"(\d+)\s+人", r"\1人", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip(" -—,:：.。")
 
@@ -638,6 +639,24 @@ def parse_colon_headcount_with_pending(line: str, pending_task_line: str | None)
     return {"分判": contractor, "工序": task, "人數": m.group("count"), "分區": zone, "樓層": floor}
 
 
+
+def split_line_on_contractor_switches(line: str) -> list[str]:
+    """Split compact lines when a new known contractor starts after punctuation/space."""
+    parts = []
+    start = 0
+    pattern = r'(?<=[。；;，,\s])(' + '|'.join(re.escape(x) for x in sorted(KNOWN_CONTRACTORS, key=len, reverse=True)) + r')(?=\s|[\u4e00-\u9fff]|\d)'
+    for m in re.finditer(pattern, line):
+        if m.start() <= start:
+            continue
+        prev = line[start:m.start()].strip(' 。；;，,')
+        if prev:
+            parts.append(prev)
+        start = m.start()
+    tail = line[start:].strip(' 。；;，,')
+    if tail:
+        parts.append(tail)
+    return parts or [line]
+
 def parse_segment(seg: dict):
     body = seg["body"]
     lines = [ln.strip() for ln in body.splitlines() if ln.strip() and not ln.strip().startswith(NON_WORK_PREFIXES)]
@@ -746,7 +765,18 @@ def parse_segment(seg: dict):
 
         floor_removed_from_record = bool(embedded_floors and HEADCOUNT_RE.search(line))
         inline_current_contractor = None if floor_removed_from_record else current_contractor
-        inline = maybe_extract_inline_record(line_for_record, inline_current_contractor)
+        record_parts = split_line_on_contractor_switches(line_for_record) if HEADCOUNT_RE.search(line_for_record) else [line_for_record]
+        inline = []
+        local_contractor = inline_current_contractor
+        for record_part in record_parts:
+            parsed_part = maybe_extract_inline_record(record_part, local_contractor)
+            if parsed_part:
+                part_rows = parsed_part if isinstance(parsed_part, list) else [parsed_part]
+                inline.extend(part_rows)
+                if part_rows and is_valid_contractor(part_rows[-1].get("分判")):
+                    local_contractor = part_rows[-1].get("分判")
+        if not inline:
+            inline = None
         if not inline and not HEADCOUNT_RE.search(line_for_record):
             inline = parse_no_headcount_record(line_for_record, current_contractor)
         if inline:
