@@ -206,6 +206,15 @@ def fill_worker_type(row: dict) -> dict:
     if contractor == '利安 打lift膽' and task == '石矢':
         out['分判'] = '利安'
         out['工序'] = '打lift膽石矢'
+
+    # If a floor range appears at the start of the task, e.g.
+    # "中建外勞：4人 - 10至12樓執場安全執整，地吼止水", move it to 樓層.
+    task = str(out.get('工序') or '').strip()
+    floor_match = re.match(r'^(?P<floor>\d+\s*(?:至|-|到)\s*\d+樓)\s*(?P<task>.+)$', task)
+    if floor_match:
+        if not str(out.get('樓層') or '').strip() or str(out.get('樓層')).lower() == 'null':
+            out['樓層'] = re.sub(r'\s+', '', floor_match.group('floor'))
+        out['工序'] = floor_match.group('task').strip(' -—，,')
     return out
 
 
