@@ -245,6 +245,21 @@ def fill_worker_type(row: dict) -> dict:
     if '捷信（水喉）' in raw and str(out.get('工序') or '').strip() == '搬存料區':
         out['分判'] = '捷信'
 
+    # Contractor aliases/notes in parentheses.
+    contractor = str(out.get('分判') or '').strip()
+    if contractor.startswith('長樂'):
+        out['分判'] = '長樂'
+    if contractor.startswith('美時'):
+        out['分判'] = '美時'
+
+    # 集寶（建安）（恆昇） style: use the contractor indicated in parentheses.
+    task_now = str(out.get('工序') or '').strip()
+    if '集寶' in raw:
+        if '掛水喉' in task_now and '建安' in raw:
+            out['分判'] = '建安'
+        if '裝燈喉' in task_now and ('恆昇' in raw or '恒昇' in raw):
+            out['分判'] = '恆昇'
+
     # CCTV/camera count before headcount is not the task.
     if str(out.get('工序') or '').strip() == '1貓':
         out['工序'] = '清欄板枋'

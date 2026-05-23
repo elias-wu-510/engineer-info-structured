@@ -21,7 +21,7 @@ CONTRACTOR_HEADING_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z0-9·•\-~  ]{1,20}
 KNOWN_CONTRACTORS = [
     "陳橋", "藝薪", "藝新", "日麗雅", "明泰", "順利", "萬通", "偉健", "利安", "秦深记", "美時",
     "中機電", "遠東德鴻", "捷信", "駿慶", "萬利", "力成", "仙壁", "康和", "恆昇", "恒記",
-    "浩洲", "新豪", "鉅城", "永興", "好標準", "中建", "安全外勞", "安全外",
+    "浩洲", "新豪", "鉅城", "永興", "好標準", "中建", "長樂", "安全外勞", "安全外",
 ]
 
 KNOWN_TASKS = [
@@ -67,6 +67,14 @@ def split_worker_type(value: str | None) -> tuple[str, str | None]:
 
 def normalize_contractor_name(value: str | None) -> str:
     value = clean_task(value or "")
+    # Parentheses may be aliases or trade notes, not separate contractor names.
+    # 長樂（長盛） = 長樂 / 長樂長盛.
+    if value.startswith("長樂"):
+        return "長樂"
+    # 美時有時會寫「美時（平水）」/「美時（泥水）」等，統一為美時。
+    if value.startswith("美時"):
+        return "美時"
+    value = re.sub(r"[（(](?:長盛|平水|泥水|水喉)[）)]", "", value).strip()
     value = ROLE_SUFFIX_RE.sub("", value).strip()
     value = re.sub(r"人$", "", value).strip()
     return value
