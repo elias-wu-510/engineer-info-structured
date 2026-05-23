@@ -209,6 +209,14 @@ def fill_worker_type(row: dict) -> dict:
 
     raw = str(out.get('原始消息') or '')
 
+    # Contractor should generally be the company/team name. If parser attaches letters/digits
+    # to a known contractor (e.g. 榮豐PD打碼4人 -> 分判=榮豐PD), move suffix into 工序.
+    contractor = str(out.get('分判') or '').strip()
+    task = str(out.get('工序') or '').strip()
+    if contractor == '榮豐PD' and task == '打碼':
+        out['分判'] = '榮豐'
+        out['工序'] = 'PD打碼'
+
     # Keep compound task phrases together when the parser/LLM split them into duplicated rows.
     task = str(out.get('工序') or '').strip()
     compound_tasks = [
