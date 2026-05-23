@@ -775,7 +775,9 @@ def parse_segment(seg: dict):
         total_heading = re.fullmatch(r"(?P<contractor>[\u4e00-\u9fff]{2,8})人?(?P<count>\d+)人", line)
         if total_heading:
             contractor = normalize_contractor_name(total_heading.group("contractor"))
-            if is_valid_contractor(contractor):
+            # Only treat as a contractor total heading when it is really a plain contractor name.
+            # Lines like 順利清場1人 / 順利做重欄2人 are actual work rows and must not be swallowed.
+            if is_valid_contractor(contractor) and contractor in KNOWN_CONTRACTORS:
                 current_contractor = contractor
                 continue
 
