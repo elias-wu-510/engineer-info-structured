@@ -209,6 +209,12 @@ def fill_worker_type(row: dict) -> dict:
 
     raw = str(out.get('原始消息') or '')
 
+    # Heading-style contractor block: 利安 / 19/F 打鑿石矢1人 / 20/F 吊運1人.
+    if '\n利安\n' in raw and str(out.get('分判') or '').strip() == '打鑿':
+        out['分判'] = '利安'
+        if str(out.get('工序') or '').strip() == '石矢':
+            out['工序'] = '打鑿石矢'
+
     # Contractor should generally be the company/team name. If parser attaches letters/digits
     # to a known contractor (e.g. 榮豐PD打碼4人 -> 分判=榮豐PD), move suffix into 工序.
     contractor = str(out.get('分判') or '').strip()

@@ -806,7 +806,9 @@ def parse_segment(seg: dict):
             row_floor = pending_floor
 
         floor_removed_from_record = bool(embedded_floors and HEADCOUNT_RE.search(line))
-        inline_current_contractor = None if floor_removed_from_record else current_contractor
+        # If a contractor heading appears on the previous line, e.g.
+        # 偉健 / 20/F 上拆埋碼8人, keep that contractor after removing the floor.
+        inline_current_contractor = current_contractor
         record_parts = split_line_on_contractor_switches(line_for_record) if HEADCOUNT_RE.search(line_for_record) else [line_for_record]
         inline = []
         local_contractor = inline_current_contractor
