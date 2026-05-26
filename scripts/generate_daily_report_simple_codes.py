@@ -84,6 +84,10 @@ def load_china_state_staff_mapping(wb):
         code = abbr_to_s.get(norm(abbr).upper())
         if code:
             mapping[norm(trade)] = {'daily_code': code, 'source': sheet_name, 'source_row': r}
+    # Access reports include SE-003-安全經理, but the 中建工種 sheet only
+    # lists 助理安全經理. Treat Safety Manager titles as Safety Officer/S12.
+    for title in ['安全經理', '高級安全經理']:
+        mapping[norm(title)] = {'daily_code': 'S12', 'source': sheet_name + ':manual_safety_alias'}
     return mapping
 
 def load_daily_code_names(wb):
