@@ -108,6 +108,35 @@ def code_to_target(code):
         n=int(s); return LABOUR_ROW, LABOUR_START_COL+n-1, 'labour'
     return None
 
+
+def add_unmatched_sheet(wb, unmatched):
+    if '未匹配工種' in wb.sheetnames:
+        del wb['未匹配工種']
+    ws = wb.create_sheet('未匹配工種')
+    headers = ['reason', 'company', 'trade', 'count', 'source_row', 'candidate_codes']
+    ws.append(headers)
+    try:
+        from openpyxl.styles import Font, PatternFill, Alignment
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill('solid', fgColor='D9EAF7')
+            cell.alignment = Alignment(horizontal='center')
+    except Exception:
+        pass
+    for r in unmatched:
+        ws.append([
+            r.get('reason',''),
+            r.get('company',''),
+            r.get('trade',''),
+            r.get('count',''),
+            r.get('row',''),
+            ';'.join(r.get('candidate_codes', [])) if isinstance(r.get('candidate_codes'), list) else '',
+        ])
+    widths = {'A':26,'B':45,'C':45,'D':10,'E':10,'F':24}
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+    ws.freeze_panes = 'A2'
+
 def generate(mapping_path, access_path, output_path, summary_path=None):
     map_wb = load_workbook(mapping_path, data_only=False)
     cic_map, cic_by_trade, ambiguous_by_trade = load_cic_mapping(map_wb)
@@ -173,6 +202,8 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
     for c in range(BS_START_COL, BS_START_COL+12):
         if ws.cell(20,c).value is None:
             ws.cell(20,c).value = f'=SUM({ws.cell(17,c).coordinate}:{ws.cell(19,c).coordinate})'
+
+    add_unmatched_sheet(out_wb, unmatched)
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
