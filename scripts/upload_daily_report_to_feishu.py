@@ -17,6 +17,9 @@ FIELDS=[
     {'field_name':'状态','type':1},
     {'field_name':'Daily Report Excel','type':17},
     {'field_name':'未匹配清单','type':17},
+    {'field_name':'新增工种人数','type':2},
+    {'field_name':'新增工种数','type':2},
+    {'field_name':'最终写入人数','type':2},
 ]
 
 def req_json(url, token=None, payload=None, method=None):
@@ -73,10 +76,13 @@ def create_record(token, summary, report_file, unmatched_file):
         '日期': str(summary.get('report_date_header') or ''),
         '出入闸总人数': int(summary.get('access_total') or 0),
         '已匹配人数': int(summary.get('matched_total') or 0),
-        '未匹配人数': int(summary.get('unmatched_total') or 0),
+        '未匹配人数': int(summary.get('final_unmatched_total', summary.get('unmatched_total') or 0) or 0),
         '匹配记录数': int(summary.get('matched_record_count') or 0),
-        '未匹配记录数': int(summary.get('unmatched_record_count') or 0),
-        '状态': '有未匹配' if int(summary.get('unmatched_total') or 0) else '完成',
+        '未匹配记录数': int(summary.get('final_unmatched_record_count', summary.get('unmatched_record_count') or 0) or 0),
+        '状态': str(summary.get('status') or ('有未匹配' if int(summary.get('unmatched_total') or 0) else '完成')),
+        '新增工种人数': int(summary.get('new_trade_total') or 0),
+        '新增工种数': int(summary.get('new_trade_record_count') or 0),
+        '最终写入人数': int(summary.get('final_written_total', summary.get('matched_total') or 0) or 0),
         'Daily Report Excel': [{'file_token': rf}],
     }
     if uf: fields['未匹配清单']=[{'file_token':uf}]
