@@ -217,6 +217,12 @@ def fill_worker_type(row: dict) -> dict:
         if str(out.get('樓層') or '').strip() == expected_split:
             out['樓層'] = f"{raw_floor_range.group(1)}-{raw_floor_range.group(2)}樓"
 
+    raw_floor_pair = re.search(r'(\d+)樓及(\d+)樓', raw)
+    if raw_floor_pair:
+        expected_split = f"{raw_floor_pair.group(1)}樓，{raw_floor_pair.group(2)}樓"
+        if str(out.get('樓層') or '').strip() == expected_split:
+            out['樓層'] = f"{raw_floor_pair.group(1)}樓及{raw_floor_pair.group(2)}樓"
+
     # Heading-style contractor block: 利安 / 19/F 打鑿石矢1人 / 20/F 吊運1人.
     if '\n利安\n' in raw and str(out.get('分判') or '').strip() == '打鑿':
         out['分判'] = '利安'
