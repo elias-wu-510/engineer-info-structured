@@ -9,6 +9,7 @@ APP_TOKEN='ArDYb6sZtaqu2jsML3IcMe6qncf'
 TABLE_ID='tbl1dH9GihZQ8HoC'
 FIELDS=[
     {'field_name':'日期','type':1},
+    {'field_name':'報表日期','type':1},
     {'field_name':'出入闸总人数','type':2},
     {'field_name':'已匹配人数','type':2},
     {'field_name':'未匹配人数','type':2},
@@ -16,6 +17,7 @@ FIELDS=[
     {'field_name':'未匹配记录数','type':2},
     {'field_name':'状态','type':1},
     {'field_name':'Daily Report Excel','type':17},
+    {'field_name':'出入閘源文件','type':17},
     {'field_name':'未匹配清单','type':17},
     {'field_name':'新增工种人数','type':2},
     {'field_name':'新增工种数','type':2},
@@ -74,6 +76,7 @@ def create_record(token, summary, report_file, unmatched_file):
     uf=upload_file(token, unmatched_file) if unmatched_file else None
     fields={
         '日期': str(summary.get('report_date_header') or ''),
+        '報表日期': str(summary.get('report_date') or summary.get('report_date_header') or ''),
         '出入闸总人数': int(summary.get('access_total') or 0),
         '已匹配人数': int(summary.get('matched_total') or 0),
         '未匹配人数': int(summary.get('final_unmatched_total', summary.get('unmatched_total') or 0) or 0),
