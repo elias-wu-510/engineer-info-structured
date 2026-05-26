@@ -5,7 +5,7 @@ Output format:
   Row 1: trade names for code 1-34 and B1-B12
   Row 2: access-gate headcount mapped to each code
 
-Staff codes S1-S16 and non-mapped/new trades are excluded by design.
+Non-mapped/new trades are excluded by design.
 """
 from __future__ import annotations
 import argparse, json, re
@@ -53,6 +53,8 @@ def load_daily_code_names(wb):
     ws = wb['daily report碼表']
     names = {}
     for r in range(2, ws.max_row+1):
+        if ws.cell(r,1).value:
+            names[str(ws.cell(r,1).value).strip().upper()] = ws.cell(r,2).value
         if ws.cell(r,3).value:
             names[str(ws.cell(r,3).value).strip().upper()] = ws.cell(r,4).value
         if ws.cell(r,5).value:
@@ -60,7 +62,7 @@ def load_daily_code_names(wb):
     return names
 
 def wanted_codes():
-    return [str(i) for i in range(1,35)] + [f'B{i}' for i in range(1,13)]
+    return [str(i) for i in range(1,35)] + [f'B{i}' for i in range(1,13)] + [f'S{i}' for i in range(1,17)]
 
 def parse_access_report(path):
     wb = load_workbook(path, data_only=True)
@@ -126,10 +128,13 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
 
     labour_codes = [str(i) for i in range(1,35)]
     bs_codes = [f'B{i}' for i in range(1,13)]
+    staff_codes = [f'S{i}' for i in range(1,17)]
     write_block(labour_codes, 1, 2, 'D9EAF7')
     write_block(bs_codes, 3, 4, 'E2F0D9')
+    write_block(staff_codes, 5, 6, 'FCE4D6')
     ws.row_dimensions[1].height = 60
     ws.row_dimensions[3].height = 60
+    ws.row_dimensions[5].height = 60
     ws.freeze_panes = 'A2'
     output_path = Path(output_path); output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
