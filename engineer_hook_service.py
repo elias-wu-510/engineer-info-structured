@@ -222,6 +222,9 @@ def fill_worker_type(row: dict) -> dict:
     if contractor == '榮豐PD' and task == '打碼':
         out['分判'] = '榮豐'
         out['工序'] = 'PD打碼'
+    if contractor == '創豐落' and task == '石矢':
+        out['分判'] = '創豐'
+        out['工序'] = '落石矢'
 
     # Keep compound task phrases together when the parser/LLM split them into duplicated rows.
     task = str(out.get('工序') or '').strip()

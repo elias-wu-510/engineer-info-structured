@@ -45,6 +45,8 @@ def looks_like_engineering_message(text: str) -> bool:
         return True
     if TIMESTAMPED_CHAT_RE.search(text) and DATE_RE.search(text) and HEADCOUNT_RE.search(text):
         return True
+    if DATE_RE.search(text) and HEADCOUNT_RE.search(text) and FLOOR_RE.search(text):
+        return True
     if hint_hits >= 2 and (HEADCOUNT_RE.search(text) or DATE_RE.search(text)) and (FLOOR_RE.search(text) or "座" in text or "Block" in text or "Blk" in text):
         return True
     if hint_hits >= 4 and structural_hits >= 2:
