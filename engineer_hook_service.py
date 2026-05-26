@@ -209,6 +209,14 @@ def fill_worker_type(row: dict) -> dict:
 
     raw = str(out.get('原始消息') or '')
 
+    # Preserve numeric floor ranges from raw text, e.g. 3-4樓 is one range,
+    # not two separate floors 3樓 and 4樓.
+    raw_floor_range = re.search(r'(\d+)\s*[-‑–—]\s*(\d+)樓', raw)
+    if raw_floor_range:
+        expected_split = f"{raw_floor_range.group(1)}樓，{raw_floor_range.group(2)}樓"
+        if str(out.get('樓層') or '').strip() == expected_split:
+            out['樓層'] = f"{raw_floor_range.group(1)}-{raw_floor_range.group(2)}樓"
+
     # Heading-style contractor block: 利安 / 19/F 打鑿石矢1人 / 20/F 吊運1人.
     if '\n利安\n' in raw and str(out.get('分判') or '').strip() == '打鑿':
         out['分判'] = '利安'
