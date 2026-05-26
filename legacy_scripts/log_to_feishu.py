@@ -599,6 +599,15 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
 
     if current_contractor and is_valid_contractor(current_contractor) and before:
         zone_new, before_no_zone = extract_zone(before)
+        # Inline rows can switch contractor even under a previous contractor heading:
+        #   順利 1人 zone 4 地台打花
+        #   仙壁 8人 zone4 &zone 3 封板&頂底槽&塞棉
+        # Do not inherit current_contractor when the text before N人 is itself a contractor.
+        if is_valid_contractor(before_no_zone):
+            zone_after, after_no_zone = extract_zone(after)
+            task = final_clean_task(after_no_zone)
+            if task:
+                return {"分判": normalize_contractor_name(before_no_zone), "工序": task, "人數": count, "分區": zone_new or zone_after}
         known_contractor2, known_task2 = split_known_contractor(before_no_zone)
         if known_contractor2 and known_task2:
             task = final_clean_task((known_task2 + " " + after).strip())
