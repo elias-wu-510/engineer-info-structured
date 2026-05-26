@@ -308,7 +308,16 @@ def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, 
         source_label = f'incremental chunk from {log_file.name} chars={len(log_text)}'
     imported = set(import_state.get('imported', []))
     rows = fill_worker_types(rows)
-    new_rows = [row for row in rows if row_fingerprint(row) not in imported]
+    # Deduplicate within the same parsed batch too. LLM/rule output can contain
+    # two rows that become identical after post-processing compound tasks.
+    batch_seen = set()
+    new_rows = []
+    for row in rows:
+        fp = row_fingerprint(row)
+        if fp in imported or fp in batch_seen:
+            continue
+        batch_seen.add(fp)
+        new_rows.append(row)
     print(f'Feishu import parsed source={source_label} rows={len(rows)} new_rows={len(new_rows)} elapsed={time.monotonic() - import_start:.2f}s', flush=True)
     if not new_rows:
         return 0, rows, []
