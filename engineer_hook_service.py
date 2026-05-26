@@ -297,6 +297,27 @@ def fill_worker_type(row: dict) -> dict:
 def fill_worker_types(rows: list[dict]) -> list[dict]:
     return [fill_worker_type(r) for r in rows]
 
+def split_multi_floor_rows(rows: list[dict]) -> list[dict]:
+    """Split rows whose floor field lists multiple discrete floors.
+
+    Keep ranges such as 10至12樓 or 8-G樓 intact; only split explicit comma lists
+    like 6F，7F / 3樓,4樓 so each floor remains a separate record.
+    """
+    out = []
+    for row in rows:
+        floor = str(row.get('樓層') or '').strip()
+        if ('，' in floor or ',' in floor) and '至' not in floor and '-' not in floor:
+            parts = [p.strip() for p in re.split(r'[，,]', floor) if p.strip()]
+            if len(parts) > 1:
+                for part in parts:
+                    item = dict(row)
+                    item['樓層'] = part
+                    out.append(item)
+                continue
+        out.append(row)
+    return out
+
+
 def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, dry_run=False, log_text: str | None = None):
     import_start = time.monotonic()
     import_state = load_import_state(import_state_file)
@@ -309,7 +330,7 @@ def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, 
         rows = parse_rows_from_log_text(log_file.name, log_text, start_time=start_time, policy=policy)
         source_label = f'incremental chunk from {log_file.name} chars={len(log_text)}'
     imported = set(import_state.get('imported', []))
-    rows = fill_worker_types(rows)
+    rows = split_multi_floor_rows(fill_worker_types(rows))
     # Deduplicate within the same parsed batch too. LLM/rule output can contain
     # two rows that become identical after post-processing compound tasks.
     batch_seen = set()
