@@ -332,6 +332,38 @@ def split_multi_floor_rows(rows: list[dict]) -> list[dict]:
     return out
 
 
+
+def row_report_date_mismatch(row: dict) -> tuple[bool, str, str]:
+    """Return (mismatch, record_date, sent_date) for immediate same-day work reports.
+
+    Work-report chat messages are treated as same-day reports. If a parsed row
+    explicitly contains a date different from the message send date, reject it
+    so users can catch accidental date input errors.
+    """
+    record_date = display_record_date(row.get('日期'))
+    sent_raw = str(row.get('發送時間') or '').strip()
+    if not sent_raw or sent_raw.lower() == 'null' or record_date == '未標明日期':
+        return False, record_date, ''
+    m = re.search(r'(20\d{2})-(\d{1,2})-(\d{1,2})', sent_raw)
+    if not m:
+        return False, record_date, ''
+    y, mo, d = m.groups()
+    sent_date = f'{int(d):02d}/{int(mo):02d}/{y}'
+    return record_date != sent_date, record_date, sent_date
+
+
+def split_invalid_report_date_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    valid, invalid = [], []
+    for row in rows:
+        mismatch, record_date, sent_date = row_report_date_mismatch(row)
+        if mismatch:
+            bad = dict(row)
+            bad['_日期錯誤'] = f'{record_date} != {sent_date}'
+            invalid.append(bad)
+        else:
+            valid.append(row)
+    return valid, invalid
+
 def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, dry_run=False, log_text: str | None = None):
     import_start = time.monotonic()
     import_state = load_import_state(import_state_file)
@@ -345,6 +377,9 @@ def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, 
         source_label = f'incremental chunk from {log_file.name} chars={len(log_text)}'
     imported = set(import_state.get('imported', []))
     rows = split_multi_floor_rows(fill_worker_types(rows))
+    rows, invalid_date_rows = split_invalid_report_date_rows(rows)
+    if invalid_date_rows:
+        print(f'Rejected {len(invalid_date_rows)} rows with non-send-day 日期', flush=True)
     # Deduplicate within the same parsed batch too. LLM/rule output can contain
     # two rows that become identical after post-processing compound tasks.
     batch_seen = set()
@@ -357,7 +392,7 @@ def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, 
         new_rows.append(row)
     print(f'Feishu import parsed source={source_label} rows={len(rows)} new_rows={len(new_rows)} elapsed={time.monotonic() - import_start:.2f}s', flush=True)
     if not new_rows:
-        return 0, rows, []
+        return 0, rows, [], invalid_date_rows
     if not dry_run:
         csv_text = rows_to_csv(new_rows)
         records = parse_csv_text(csv_text)
@@ -373,8 +408,8 @@ def import_new_rows(log_file: Path, import_state_file: Path, policy_file: Path, 
         import_state['lastLog'] = log_file.name
         save_import_state(import_state_file, import_state)
         print(f'Feishu import done total_elapsed={time.monotonic() - import_start:.2f}s', flush=True)
-        return created, rows, new_rows
-    return len(new_rows), rows, new_rows
+        return created, rows, new_rows, invalid_date_rows
+    return len(new_rows), rows, new_rows, invalid_date_rows
 
 
 def floor_sort_key(floor: str):
@@ -1136,7 +1171,20 @@ def feishu_import_worker(log_file: Path, args, log_text: str | None = None):
         ensure_daily_table()
         source = 'full log' if log_text is None else f'incremental chunk chars={len(log_text)}'
         print(f'Feishu import worker start for {log_file.name} source={source} table={os.environ.get("FEISHU_BITABLE_TABLE_ID")}', flush=True)
-        created, rows, new_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run, log_text=log_text)
+        created, rows, new_rows, invalid_date_rows = import_new_rows(log_file, Path(args.import_state_file), Path(args.policy_file), dry_run=args.dry_run, log_text=log_text)
+        if invalid_date_rows:
+            warn = '❌ 檢查日期是否輸入錯誤'
+            if log_text:
+                for msg_id in find_engineering_message_ids(log_text):
+                    try:
+                        send_reaction(msg_id, '❌', args.react_url, dry_run=args.dry_run)
+                    except Exception as react_exc:
+                        print(f'WARN: invalid-date reaction failed for {msg_id}: {react_exc}', flush=True)
+            if args.target_group and args.send_url:
+                try:
+                    send_whatsapp(args.target_group, warn, args.send_url, dry_run=args.dry_run)
+                except Exception as send_exc:
+                    print(f'WARN: invalid-date warning send failed: {send_exc}', flush=True)
         if created:
             print(f'Imported {created} new rows from {log_file.name}', flush=True)
             if log_text:
