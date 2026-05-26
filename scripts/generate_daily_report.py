@@ -109,6 +109,50 @@ def code_to_target(code):
     return None
 
 
+
+def add_unmatched_trade_columns(ws, unmatched):
+    """Append unmatched trades as new Daily Report trade columns before the subtotal column."""
+    if not unmatched:
+        return {}
+    totals = Counter()
+    for r in unmatched:
+        trade = str(r.get('trade') or '未匹配工種').strip()
+        totals[trade] += int(r.get('count') or 0)
+
+    insert_at = 89  # CK subtotal column in the demo
+    # Avoid merged subtotal header blocking the first inserted trade header.
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_col <= insert_at <= rng.max_col and rng.min_row <= 15 and rng.max_row >= 9:
+            ws.unmerge_cells(str(rng))
+
+    count = len(totals)
+    ws.insert_cols(insert_at, count)
+
+    for offset, (trade, total) in enumerate(totals.items()):
+        col = insert_at + offset
+        src_col = insert_at - 1
+        for row in range(1, ws.max_row + 1):
+            copy_cell_style(ws.cell(row, src_col), ws.cell(row, col))
+        ws.cell(9, col).value = 'NEW'
+        ws.cell(10, col).value = trade
+        ws.cell(16, col).value = 'N'
+        ws.cell(20, col).value = total
+        ws.column_dimensions[ws.cell(1,col).column_letter].width = 18
+        try:
+            ws.merge_cells(start_row=10, start_column=col, end_row=15, end_column=col)
+        except Exception:
+            pass
+
+    subtotal_col = insert_at + count
+    ws.cell(9, subtotal_col).value = 'Sub Total of Each Type of Activity'
+    try:
+        ws.merge_cells(start_row=9, start_column=subtotal_col, end_row=15, end_column=subtotal_col)
+    except Exception:
+        pass
+    for row in [20,21,22,23,24]:
+        ws.cell(row, subtotal_col).value = f'=SUM(X{row}:{ws.cell(row, subtotal_col-1).coordinate})'
+    return {trade: {'count': total, 'cell': ws.cell(20, insert_at+i).coordinate, 'kind': 'new_trade'} for i,(trade,total) in enumerate(totals.items())}
+
 def add_unmatched_sheet(wb, unmatched):
     if '未匹配工種' in wb.sheetnames:
         del wb['未匹配工種']
@@ -194,6 +238,7 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
         placed[code] = {'count': total, 'cell': ws.cell(row,col).coordinate, 'kind': kind, 'desc': daily_codes.get(code,{}).get('desc')}
 
 
+    new_trade_columns = add_unmatched_trade_columns(ws, unmatched)
     add_unmatched_sheet(out_wb, unmatched)
 
     output_path = Path(output_path)
@@ -214,6 +259,7 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
         'unmatched_total': sum(r['count'] for r in unmatched),
         'placed_total': sum(v['count'] for v in placed.values()),
         'placed_by_code': placed,
+        'new_trade_columns': new_trade_columns if 'new_trade_columns' in locals() else {},
         'unsupported_codes': unsupported,
         'trade_fallback_matched': fallback_matched,
         'ambiguous': ambiguous,
