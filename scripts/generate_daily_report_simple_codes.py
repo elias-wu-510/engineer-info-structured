@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Generate a simple 2-row Excel for Daily Report labour codes only.
+
+Output format:
+  Row 1: trade names for code 1-34 and B1-B12
+  Row 2: access-gate headcount mapped to each code
+
+Staff codes S1-S16 and non-mapped/new trades are excluded by design.
+"""
+from __future__ import annotations
+import argparse, json, re
+from collections import Counter, defaultdict
+from pathlib import Path
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+
+def norm(v):
+    return re.sub(r"\s+", "", str(v or "")).strip()
+
+def to_int(v):
+    if v is None: return 0
+    if isinstance(v, (int,float)): return int(v)
+    m = re.search(r"-?\d+", str(v).replace(',', ''))
+    return int(m.group()) if m else 0
+
+def load_cic_mapping(wb):
+    ws = wb['CIC工種對應表']
+    by_company_trade = {}
+    by_trade_candidates = defaultdict(list)
+    for r in range(2, ws.max_row+1):
+        code = ws.cell(r,1).value
+        cic = ws.cell(r,2).value
+        co = ws.cell(r,3).value
+        trade = ws.cell(r,4).value
+        if code is None or not trade:
+            continue
+        item = {'daily_code': str(code).strip().upper(), 'cic_trade': cic, 'company': co, 'trade': trade, 'source_row': r}
+        if co:
+            by_company_trade[norm(co) + norm(trade)] = item
+        by_trade_candidates[norm(trade)].append(item)
+    by_trade = {}
+    ambiguous_by_trade = {}
+    for trade_key, items in by_trade_candidates.items():
+        codes = {i['daily_code'] for i in items}
+        if len(codes) == 1:
+            by_trade[trade_key] = items[0]
+        else:
+            ambiguous_by_trade[trade_key] = items
+    return by_company_trade, by_trade, ambiguous_by_trade
+
+def load_daily_code_names(wb):
+    ws = wb['daily report碼表']
+    names = {}
+    for r in range(2, ws.max_row+1):
+        if ws.cell(r,3).value:
+            names[str(ws.cell(r,3).value).strip().upper()] = ws.cell(r,4).value
+        if ws.cell(r,5).value:
+            names[str(ws.cell(r,5).value).strip().upper()] = ws.cell(r,6).value
+    return names
+
+def wanted_codes():
+    return [str(i) for i in range(1,35)] + [f'B{i}' for i in range(1,13)]
+
+def parse_access_report(path):
+    wb = load_workbook(path, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    records=[]; company=None; report_date=ws.cell(5,2).value
+    for r in range(6, ws.max_row+1):
+        name = ws.cell(r,1).value
+        if name is None: continue
+        name_s = str(name).strip()
+        if not name_s: continue
+        if name_s == '累計':
+            company = None; continue
+        count = to_int(ws.cell(r,2).value)
+        if count == 0 and ws.cell(r,2).value in (None, ''):
+            company = name_s; continue
+        if company and count:
+            records.append({'company': company, 'trade': name_s, 'count': count, 'row': r})
+    return records, report_date
+
+def generate(mapping_path, access_path, output_path, summary_path=None):
+    map_wb = load_workbook(mapping_path, data_only=False)
+    cic_map, cic_by_trade, ambiguous_by_trade = load_cic_mapping(map_wb)
+    code_names = load_daily_code_names(map_wb)
+    records, report_date = parse_access_report(access_path)
+    allowed = set(wanted_codes())
+    counts = Counter(); excluded=[]; matched=[]
+    for rec in records:
+        key = norm(rec['company']) + norm(rec['trade'])
+        m = cic_map.get(key)
+        method = 'company_trade'
+        if not m:
+            tk = norm(rec['trade'])
+            if tk in cic_by_trade:
+                m = cic_by_trade[tk]; method = 'trade_fallback'
+            elif tk in ambiguous_by_trade:
+                excluded.append({**rec, 'reason':'ambiguous_or_not_in_1-34_B1-B12'})
+                continue
+            else:
+                excluded.append({**rec, 'reason':'no_mapping_or_not_in_1-34_B1-B12'})
+                continue
+        code = str(m['daily_code']).strip().upper()
+        if code not in allowed:
+            excluded.append({**rec, 'reason':'code_not_required', 'daily_code': code})
+            continue
+        counts[code] += rec['count']
+        matched.append({**rec, 'daily_code': code, 'method': method})
+
+    wb = Workbook(); ws = wb.active; ws.title = 'Daily Report Codes'
+    thin = Side(style='thin', color='999999')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for idx, code in enumerate(wanted_codes(), 1):
+        c1=ws.cell(1,idx); c2=ws.cell(2,idx)
+        c1.value = code_names.get(code) or code
+        c2.value = counts.get(code, 0)
+        for c in (c1,c2):
+            c.border = border
+            c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        c1.font = Font(bold=True)
+        c1.fill = PatternFill('solid', fgColor='D9EAF7')
+        ws.column_dimensions[c1.column_letter].width = 18
+    ws.row_dimensions[1].height = 60
+    ws.freeze_panes = 'A2'
+    output_path = Path(output_path); output_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output_path)
+
+    summary = {
+        'report_date_header': report_date,
+        'access_total': sum(r['count'] for r in records),
+        'included_total': sum(counts.values()),
+        'excluded_total': sum(r['count'] for r in excluded),
+        'matched_record_count': len(matched),
+        'excluded_record_count': len(excluded),
+        'counts_by_code': dict(counts),
+        'excluded': excluded,
+    }
+    if summary_path:
+        Path(summary_path).write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
+    return summary
+
+if __name__ == '__main__':
+    ap=argparse.ArgumentParser()
+    ap.add_argument('--mapping', required=True)
+    ap.add_argument('--access-report', required=True)
+    ap.add_argument('--output', required=True)
+    ap.add_argument('--summary')
+    args=ap.parse_args()
+    s=generate(args.mapping,args.access_report,args.output,args.summary)
+    print(json.dumps({k:s[k] for k in ['access_total','included_total','excluded_total','matched_record_count','excluded_record_count']}, ensure_ascii=False, indent=2))
