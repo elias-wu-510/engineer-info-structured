@@ -114,8 +114,18 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
     thin = Side(style='thin', color='999999')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    def write_block(codes, name_row, count_row, fill):
-        for idx, code in enumerate(codes, 1):
+    def write_block(codes, name_row, count_row, fill, total_label):
+        total = sum(counts.get(code, 0) for code in codes)
+        ws.cell(name_row, 1).value = total_label
+        ws.cell(count_row, 1).value = total
+        for c in (ws.cell(name_row, 1), ws.cell(count_row, 1)):
+            c.border = border
+            c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        ws.cell(name_row, 1).font = Font(bold=True)
+        ws.cell(name_row, 1).fill = PatternFill('solid', fgColor='FFD966')
+        ws.column_dimensions['A'].width = 16
+
+        for idx, code in enumerate(codes, 2):
             c1=ws.cell(name_row,idx); c2=ws.cell(count_row,idx)
             c1.value = code_names.get(code) or code
             c2.value = counts.get(code, 0)
@@ -129,9 +139,9 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
     labour_codes = [str(i) for i in range(1,35)]
     bs_codes = [f'B{i}' for i in range(1,13)]
     staff_codes = [f'S{i}' for i in range(1,17)]
-    write_block(labour_codes, 1, 2, 'D9EAF7')
-    write_block(bs_codes, 3, 4, 'E2F0D9')
-    write_block(staff_codes, 5, 6, 'FCE4D6')
+    write_block(labour_codes, 1, 2, 'D9EAF7', 'Labour total人數')
+    write_block(bs_codes, 3, 4, 'E2F0D9', 'BS Labour total人數')
+    write_block(staff_codes, 5, 6, 'FCE4D6', 'Staff total人數')
     ws.row_dimensions[1].height = 60
     ws.row_dimensions[3].height = 60
     ws.row_dimensions[5].height = 60
