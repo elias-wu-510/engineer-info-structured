@@ -119,8 +119,11 @@ def merge_same_work_rows(rows: list[dict]) -> list[dict]:
     merged = []
     by_key = {}
     for row in rows:
+        # Do not merge the same contractor/task/headcount across different floors or zones;
+        # those are separate work records in site reports. Exact duplicates are handled later
+        # by fingerprint/batch dedupe.
         key = tuple((row.get(k) or 'null') for k in [
-            '發布用戶', '發送時間', '日期', '樓棟', '分判', '工序', '人數', '原始消息'
+            '發布用戶', '發送時間', '日期', '樓棟', '樓層', '分區', '分判', '工序', '人數', '原始消息'
         ])
         if key not in by_key:
             item = dict(row)
