@@ -40,16 +40,30 @@ def copy_cell_style(src, dst):
 
 def load_cic_mapping(wb):
     ws = wb['CIC工種對應表']
-    out = {}
+    by_company_trade = {}
+    by_trade_candidates = defaultdict(list)
     for r in range(2, ws.max_row+1):
         code = ws.cell(r,1).value
         cic = ws.cell(r,2).value
         co = ws.cell(r,3).value
         trade = ws.cell(r,4).value
-        if code is None or not co or not trade: continue
-        key = norm(co) + norm(trade)
-        out[key] = {'daily_code': code, 'cic_trade': cic, 'company': co, 'trade': trade}
-    return out
+        if code is None or not trade:
+            continue
+        item = {'daily_code': code, 'cic_trade': cic, 'company': co, 'trade': trade, 'source_row': r}
+        if co:
+            by_company_trade[norm(co) + norm(trade)] = item
+        by_trade_candidates[norm(trade)].append(item)
+
+    # Only use trade-only fallback when all rows for the same trade resolve to one Daily Report code.
+    by_trade = {}
+    ambiguous_by_trade = {}
+    for trade_key, items in by_trade_candidates.items():
+        codes = {str(i['daily_code']).strip().upper() for i in items}
+        if len(codes) == 1:
+            by_trade[trade_key] = items[0]
+        else:
+            ambiguous_by_trade[trade_key] = items
+    return by_company_trade, by_trade, ambiguous_by_trade
 
 def load_daily_codes(wb):
     ws = wb['daily report碼表']
@@ -96,19 +110,34 @@ def code_to_target(code):
 
 def generate(mapping_path, access_path, output_path, summary_path=None):
     map_wb = load_workbook(mapping_path, data_only=False)
-    cic_map = load_cic_mapping(map_wb)
+    cic_map, cic_by_trade, ambiguous_by_trade = load_cic_mapping(map_wb)
     daily_codes = load_daily_codes(map_wb)
     records, report_date = parse_access_report(access_path)
 
-    counts = Counter(); unmatched=[]; matched=[]
+    counts = Counter(); unmatched=[]; matched=[]; fallback_matched=[]; ambiguous=[]
     for rec in records:
         key = norm(rec['company']) + norm(rec['trade'])
         m = cic_map.get(key)
+        match_method = 'company_trade'
         if not m:
-            unmatched.append(rec); continue
+            trade_key = norm(rec['trade'])
+            if trade_key in cic_by_trade:
+                m = cic_by_trade[trade_key]
+                match_method = 'trade_fallback'
+            elif trade_key in ambiguous_by_trade:
+                cand = ambiguous_by_trade[trade_key]
+                ambiguous.append({**rec, 'candidate_codes': sorted({str(i['daily_code']).strip().upper() for i in cand})})
+                unmatched.append({**rec, 'reason': 'ambiguous_trade_fallback'})
+                continue
+            else:
+                unmatched.append({**rec, 'reason': 'no_mapping'})
+                continue
         code = str(m['daily_code']).strip().upper()
         counts[code] += rec['count']
-        matched.append({**rec, 'daily_code': code, 'cic_trade': m.get('cic_trade')})
+        row = {**rec, 'daily_code': code, 'cic_trade': m.get('cic_trade'), 'match_method': match_method}
+        matched.append(row)
+        if match_method == 'trade_fallback':
+            fallback_matched.append(row)
 
     out_wb = load_workbook(mapping_path, data_only=False)
     ws = out_wb['daily report demo']
@@ -149,13 +178,18 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
         'report_date_header': report_date,
         'access_record_count': len(records),
         'matched_record_count': len(matched),
+        'company_trade_matched_record_count': len(matched) - len(fallback_matched),
+        'trade_fallback_matched_record_count': len(fallback_matched),
         'unmatched_record_count': len(unmatched),
+        'ambiguous_record_count': len(ambiguous),
         'access_total': sum(r['count'] for r in records),
         'matched_total': sum(r['count'] for r in matched),
         'unmatched_total': sum(r['count'] for r in unmatched),
         'placed_total': sum(v['count'] for v in placed.values()),
         'placed_by_code': placed,
         'unsupported_codes': unsupported,
+        'trade_fallback_matched': fallback_matched,
+        'ambiguous': ambiguous,
         'unmatched': unmatched,
     }
     if summary_path:
@@ -168,6 +202,16 @@ if __name__ == '__main__':
     ap.add_argument('--access-report', required=True)
     ap.add_argument('--output', required=True)
     ap.add_argument('--summary')
+    ap.add_argument('--unmatched-csv', help='Optional CSV path for unmatched records')
     args=ap.parse_args()
     s=generate(args.mapping,args.access_report,args.output,args.summary)
-    print(json.dumps({k:s[k] for k in ['access_record_count','matched_record_count','unmatched_record_count','access_total','matched_total','unmatched_total','placed_total']}, ensure_ascii=False, indent=2))
+    if args.unmatched_csv:
+        import csv
+        with open(args.unmatched_csv, 'w', newline='', encoding='utf-8-sig') as f:
+            w=csv.DictWriter(f, fieldnames=['reason','company','trade','count','row','candidate_codes'])
+            w.writeheader()
+            for r in s.get('unmatched', []):
+                rr={k:r.get(k,'') for k in ['reason','company','trade','count','row']}
+                rr['candidate_codes']=';'.join(r.get('candidate_codes', [])) if isinstance(r.get('candidate_codes'), list) else ''
+                w.writerow(rr)
+    print(json.dumps({k:s[k] for k in ['access_record_count','matched_record_count','company_trade_matched_record_count','trade_fallback_matched_record_count','unmatched_record_count','ambiguous_record_count','access_total','matched_total','unmatched_total','placed_total']}, ensure_ascii=False, indent=2))
