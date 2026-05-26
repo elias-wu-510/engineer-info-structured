@@ -14,8 +14,8 @@ from openpyxl import load_workbook
 LABOUR_START_COL = 24  # X, codes 1-34 -> X:BE
 BS_START_COL = 75      # BW, codes B1-B12 -> BW:CH
 STAFF_START_COL = 2    # B, codes S1-S16 -> B:Q
-LABOUR_ROW = 19        # blank Site Activities input row in demo
-STAFF_ROW = 46         # Personnel on site today input row in demo
+LABOUR_ROW = 20        # Total row for Labour / BS Labour
+STAFF_ROW = 46         # Personnel on site today total/input row
 
 
 def norm(v):
@@ -176,16 +176,13 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
         if sheet.title != 'Daily Report':
             out_wb.remove(sheet)
 
-    # Clear target input rows but preserve styles/formulas elsewhere.
-    for c in range(LABOUR_START_COL, LABOUR_START_COL+34): ws.cell(LABOUR_ROW,c).value = None
-    for c in range(BS_START_COL, BS_START_COL+12): ws.cell(LABOUR_ROW,c).value = None
-    for c in range(STAFF_START_COL, STAFF_START_COL+16): ws.cell(STAFF_ROW,c).value = 0
-    ws.cell(LABOUR_ROW, 2).value = '=B18+0.01'
-    ws.cell(LABOUR_ROW, 3).value = 'Auto generated from access gate report'
-    ws.cell(LABOUR_ROW, 23).value = 'M/S:'
-    for c in range(1, ws.max_column+1):
-        copy_cell_style(ws.cell(18,c), ws.cell(LABOUR_ROW,c))
-    ws.cell(LABOUR_ROW, 89).value = f'=SUM(X{LABOUR_ROW}:CJ{LABOUR_ROW})'
+    # Clear/write only totals. Site Activities rows are demo-only for now.
+    for c in range(LABOUR_START_COL, LABOUR_START_COL+34):
+        ws.cell(LABOUR_ROW,c).value = 0
+    for c in range(BS_START_COL, BS_START_COL+12):
+        ws.cell(LABOUR_ROW,c).value = 0
+    for c in range(STAFF_START_COL, STAFF_START_COL+16):
+        ws.cell(STAFF_ROW,c).value = 0
 
     placed = {}; unsupported=[]
     for code, total in counts.items():
@@ -196,12 +193,6 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
         ws.cell(row, col).value = total
         placed[code] = {'count': total, 'cell': ws.cell(row,col).coordinate, 'kind': kind, 'desc': daily_codes.get(code,{}).get('desc')}
 
-    # make sure formulas include row 19 for labour/BS totals (demo already does for X:BD; add BS total row formulas if blank)
-    for c in range(LABOUR_START_COL, LABOUR_START_COL+34):
-        ws.cell(20,c).value = f'=SUM({ws.cell(17,c).coordinate}:{ws.cell(19,c).coordinate})'
-    for c in range(BS_START_COL, BS_START_COL+12):
-        if ws.cell(20,c).value is None:
-            ws.cell(20,c).value = f'=SUM({ws.cell(17,c).coordinate}:{ws.cell(19,c).coordinate})'
 
     add_unmatched_sheet(out_wb, unmatched)
 
