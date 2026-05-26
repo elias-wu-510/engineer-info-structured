@@ -142,6 +142,10 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
     out_wb = load_workbook(mapping_path, data_only=False)
     ws = out_wb['daily report demo']
     ws.title = 'Daily Report'
+    # Output must be a standalone Daily Report workbook, not the original mapping workbook.
+    for sheet in list(out_wb.worksheets):
+        if sheet.title != 'Daily Report':
+            out_wb.remove(sheet)
 
     # Clear target input rows but preserve styles/formulas elsewhere.
     for c in range(LABOUR_START_COL, LABOUR_START_COL+34): ws.cell(LABOUR_ROW,c).value = None
@@ -176,6 +180,7 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
 
     summary = {
         'report_date_header': report_date,
+        'report_date': str(report_date).split('\n')[0] if report_date is not None else '',
         'access_record_count': len(records),
         'matched_record_count': len(matched),
         'company_trade_matched_record_count': len(matched) - len(fallback_matched),
