@@ -111,17 +111,25 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
     wb = Workbook(); ws = wb.active; ws.title = 'Daily Report Codes'
     thin = Side(style='thin', color='999999')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    for idx, code in enumerate(wanted_codes(), 1):
-        c1=ws.cell(1,idx); c2=ws.cell(2,idx)
-        c1.value = code_names.get(code) or code
-        c2.value = counts.get(code, 0)
-        for c in (c1,c2):
-            c.border = border
-            c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        c1.font = Font(bold=True)
-        c1.fill = PatternFill('solid', fgColor='D9EAF7')
-        ws.column_dimensions[c1.column_letter].width = 18
+
+    def write_block(codes, name_row, count_row, fill):
+        for idx, code in enumerate(codes, 1):
+            c1=ws.cell(name_row,idx); c2=ws.cell(count_row,idx)
+            c1.value = code_names.get(code) or code
+            c2.value = counts.get(code, 0)
+            for c in (c1,c2):
+                c.border = border
+                c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            c1.font = Font(bold=True)
+            c1.fill = PatternFill('solid', fgColor=fill)
+            ws.column_dimensions[c1.column_letter].width = 18
+
+    labour_codes = [str(i) for i in range(1,35)]
+    bs_codes = [f'B{i}' for i in range(1,13)]
+    write_block(labour_codes, 1, 2, 'D9EAF7')
+    write_block(bs_codes, 3, 4, 'E2F0D9')
     ws.row_dimensions[1].height = 60
+    ws.row_dimensions[3].height = 60
     ws.freeze_panes = 'A2'
     output_path = Path(output_path); output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
