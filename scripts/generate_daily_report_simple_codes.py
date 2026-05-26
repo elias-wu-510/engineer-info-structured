@@ -24,6 +24,14 @@ def to_int(v):
     m = re.search(r"-?\d+", str(v).replace(',', ''))
     return int(m.group()) if m else 0
 
+def strip_trade_prefix(v):
+    """Remove leading access-report job code prefixes before matching staff titles.
+
+    Examples: ADM060-助理地盤行政經理, PM-030-結構工程師, SE-003-安全經理.
+    """
+    text = str(v or "").strip()
+    return re.sub(r"^[A-Za-z]+-?\d+[-－–—]\s*", "", text).strip()
+
 def load_cic_mapping(wb):
     ws = wb['CIC工種對應表']
     by_company_trade = {}
@@ -129,6 +137,8 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
                 m = cic_by_trade[tk]; method = 'trade_fallback'
             elif tk in china_state_staff_by_trade:
                 m = china_state_staff_by_trade[tk]; method = 'china_state_staff_trade'
+            elif norm(strip_trade_prefix(rec['trade'])) in china_state_staff_by_trade:
+                m = china_state_staff_by_trade[norm(strip_trade_prefix(rec['trade']))]; method = 'china_state_staff_trade_strip_prefix'
             elif tk in ambiguous_by_trade:
                 excluded.append({**rec, 'reason':'ambiguous_or_not_in_1-34_B1-B12_S1-S16'})
                 continue
