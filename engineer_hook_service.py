@@ -286,8 +286,10 @@ def fill_worker_type(row: dict) -> dict:
     task = str(out.get('工序') or '').strip()
     floor_match = re.match(r'^(?P<floor>\d+\s*(?:至|-|到)\s*\d+樓)\s*(?P<task>.+)$', task)
     if floor_match:
-        if not str(out.get('樓層') or '').strip() or str(out.get('樓層')).lower() == 'null':
-            out['樓層'] = re.sub(r'\s+', '', floor_match.group('floor'))
+        extracted_floor = re.sub(r'\s+', '', floor_match.group('floor'))
+        # Override an incorrectly inherited single floor when the task itself starts
+        # with an explicit floor range, e.g. 10至12樓執場安全執整.
+        out['樓層'] = extracted_floor
         out['工序'] = floor_match.group('task').strip(' -—，,')
     return out
 
