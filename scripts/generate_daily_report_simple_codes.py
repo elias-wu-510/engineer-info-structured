@@ -49,6 +49,35 @@ def load_cic_mapping(wb):
             ambiguous_by_trade[trade_key] = items
     return by_company_trade, by_trade, ambiguous_by_trade
 
+
+def load_china_state_staff_mapping(wb):
+    """Load 中建工種 sheet: trade title -> Staff S code via abbreviation.
+
+    The sheet columns are 工種, 職位名稱 where 職位名稱 is an abbreviation
+    such as PM/AM/E/AE/BS/QS/Safety/etc.  These map to S1-S16.
+    """
+    sheet_name = '中建工種' if '中建工種' in wb.sheetnames else None
+    if not sheet_name:
+        return {}
+    abbr_to_s = {
+        'PM':'S1', 'AM':'S2', 'SITEAGENT':'S3', 'GENERAL':'S4',
+        'FOREMAN':'S5', 'E':'S6', 'AE':'S6', 'BS':'S7', 'PLANNING':'S8',
+        'QUALITY':'S9', 'BIM':'S10', 'QS':'S11', 'SAFETY':'S12',
+        'ENVI':'S13', 'LABOUR':'S14', 'WATCHMAN':'S15',
+        'OTHER':'S16',
+    }
+    ws = wb[sheet_name]
+    mapping = {}
+    for r in range(2, ws.max_row+1):
+        trade = ws.cell(r,1).value
+        abbr = ws.cell(r,2).value
+        if not trade or not abbr:
+            continue
+        code = abbr_to_s.get(norm(abbr).upper())
+        if code:
+            mapping[norm(trade)] = {'daily_code': code, 'source': sheet_name, 'source_row': r}
+    return mapping
+
 def load_daily_code_names(wb):
     ws = wb['daily report碼表']
     names = {}
@@ -85,6 +114,7 @@ def parse_access_report(path):
 def generate(mapping_path, access_path, output_path, summary_path=None):
     map_wb = load_workbook(mapping_path, data_only=False)
     cic_map, cic_by_trade, ambiguous_by_trade = load_cic_mapping(map_wb)
+    china_state_staff_by_trade = load_china_state_staff_mapping(map_wb)
     code_names = load_daily_code_names(map_wb)
     records, report_date = parse_access_report(access_path)
     allowed = set(wanted_codes())
@@ -97,11 +127,13 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
             tk = norm(rec['trade'])
             if tk in cic_by_trade:
                 m = cic_by_trade[tk]; method = 'trade_fallback'
+            elif tk in china_state_staff_by_trade:
+                m = china_state_staff_by_trade[tk]; method = 'china_state_staff_trade'
             elif tk in ambiguous_by_trade:
-                excluded.append({**rec, 'reason':'ambiguous_or_not_in_1-34_B1-B12'})
+                excluded.append({**rec, 'reason':'ambiguous_or_not_in_1-34_B1-B12_S1-S16'})
                 continue
             else:
-                excluded.append({**rec, 'reason':'no_mapping_or_not_in_1-34_B1-B12'})
+                excluded.append({**rec, 'reason':'no_mapping_or_not_in_1-34_B1-B12_S1-S16'})
                 continue
         code = str(m['daily_code']).strip().upper()
         if code not in allowed:
