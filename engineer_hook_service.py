@@ -489,6 +489,57 @@ def summary_building_label(value: str | None) -> str:
     return raw
 
 
+
+def summary_contractor_label(value: str | None) -> str:
+    raw = str(value or '').strip() or '未標明分判'
+    if raw.lower() == 'null':
+        return '未標明分判'
+    # Normalize common simplified/traditional variants and aliases for summary/statistics only.
+    aliases = {
+        '德鸿': '德鴻',
+        '德鴻': '德鴻',
+        '远东德鸿': '遠東德鴻',
+        '遠東德鸿': '遠東德鴻',
+        '遠東德鴻': '遠東德鴻',
+        '恒昇': '恆昇',
+        '恆昇': '恆昇',
+        '秦深记': '秦深記',
+        '秦深記': '秦深記',
+        '艺新': '藝新',
+        '藝新': '藝新',
+        '艺薪': '藝薪',
+        '藝薪': '藝薪',
+        '万利': '萬利',
+        '萬利': '萬利',
+        '万通': '萬通',
+        '萬通': '萬通',
+        '伟健': '偉健',
+        '偉健': '偉健',
+        '骏庆': '駿慶',
+        '駿慶': '駿慶',
+        '陈桥': '陳橋',
+        '陳橋': '陳橋',
+        '顺利': '順利',
+        '順利': '順利',
+        '荣丰': '榮豐',
+        '榮豐': '榮豐',
+        '长乐': '長樂',
+        '長樂': '長樂',
+        '联明': '聯明',
+        '聯明': '聯明',
+        '联谊': '聯誼',
+        '聯誼': '聯誼',
+        '基业': '基業',
+        '基業': '基業',
+        '源兴': '源興',
+        '源興': '源興',
+    }
+    if raw.startswith('長樂'):
+        return '長樂'
+    if raw.startswith('美時'):
+        return '美時'
+    return aliases.get(raw, raw)
+
 def build_summary(rows: list[dict], requested_date: str | None = None, building_filter: str | None = None) -> str:
     target_building = summary_building_label(building_filter) if building_filter else None
     heading = target_building or None
@@ -523,7 +574,7 @@ def build_summary(rows: list[dict], requested_date: str | None = None, building_
             for floor in sorted(floors, key=floor_sort_key):
                 blocks.append(floor)
                 for r in floors[floor]:
-                    contractor = (r.get('分判') or '未標明分判').strip()
+                    contractor = summary_contractor_label(r.get('分判'))
                     count = (r.get('人數') or 'null').strip()
                     task = (r.get('工序') or '').strip()
                     zone = (r.get('分區') or '').strip()
@@ -996,7 +1047,7 @@ def build_floor_detail_rows(rows: list[dict], report_date: str) -> list[dict]:
         building = summary_building_label(r.get('樓棟'))
         floor = (r.get('樓層') or 'null').strip() or 'null'
         zone = (r.get('分區') or 'null').strip() or 'null'
-        contractor = (r.get('分判') or 'null').strip() or 'null'
+        contractor = summary_contractor_label(r.get('分判'))
         task = (r.get('工序') or 'null').strip() or 'null'
         count_raw = str(r.get('人數') or '').strip()
         count = int(count_raw) if count_raw.isdigit() else 0
@@ -1036,7 +1087,7 @@ def render_floor_detail_report(rows: list[dict], report_date: str, report_dir: s
         if building not in grouped:
             building = 'Null'
         floor = (r.get('樓層') or '未標明樓層').strip() or '未標明樓層'
-        contractor = (r.get('分判') or '未標明分判').strip()
+        contractor = summary_contractor_label(r.get('分判'))
         count = str(r.get('人數') or '').strip()
         zone = (r.get('分區') or '').strip()
         task = (r.get('工序') or '').strip()
