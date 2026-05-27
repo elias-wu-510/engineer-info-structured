@@ -20,9 +20,14 @@ IGNORE_TASK_HINTS = ("執狗臂架",)
 CONTRACTOR_HEADING_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z0-9·•\-~  ]{1,20}[:：]?$")
 KNOWN_CONTRACTORS = [
     "陳橋", "藝薪", "藝新", "日麗雅", "明泰", "順利", "萬通", "偉健", "利安", "秦深记", "美時",
-    "中機電", "遠東德鴻", "德鴻", "德鸿", "捷信", "駿慶", "萬利", "力成", "仙壁", "康和", "恆昇", "恒記",
+    "中機電", "遠東德鴻", "德鴻", "德鸿", "遠東億雄", "怡和", "怡和（JEC)", "怡和（JEC)", "駿興", "福明", "東洋", "鴻溢", "捷信", "駿慶", "萬利", "力成", "仙壁", "康和", "恆昇", "恒記",
     "浩洲", "創豐", "新豪", "鉅城", "永興", "榮豐", "好標準", "中建", "長樂", "京臻", "永輝", "安全外勞", "安全外",
 ]
+
+INVALID_CONTRACTOR_VALUES = {
+    "東", "西", "南", "北", "東面", "西面", "南面", "北面",
+    "東北面", "西北面", "東南面", "西南面", "Ab橋頭", "AB橋頭", "樓內",
+}
 
 KNOWN_TASKS = [
     "安裝Drywall", "BS Opening吊板", "BS opening 吊板", "鑽窿", "鏟地台+清理", "鏟地台", "剷地台", "炮尾", "石矢", "墨斗", "跟炮尾清泥頭", "清場", "磚牆",
@@ -39,9 +44,16 @@ def is_valid_contractor(value: str | None) -> bool:
     if not value:
         return False
     value = value.strip().rstrip(":：")
+    if value in INVALID_CONTRACTOR_VALUES:
+        return False
     if re.match(r"^\d", value):
         return False
     if re.fullmatch(r"[A-Z]座", value):
+        return False
+    # Location fragments must not become contractors, e.g. 北 / Ab橋頭 / C座 近CA... / B8~9 打.
+    if re.search(r"(?:^|\s)[A-Z]座", value) or re.search(r"近[A-Z0-9]|向(?:SiteB|siteB|megabox|體育園)", value):
+        return False
+    if re.search(r"[A-Z]\d\s*[~至-]", value) and len(value) <= 12:
         return False
     # 分判必须是中文词组；纯数字/英文/编号（如 ST01）只能作为区域/备注，不能作为分判。
     return bool(re.search(r"[\u4e00-\u9fff]", value))
@@ -69,6 +81,8 @@ def normalize_contractor_name(value: str | None) -> str:
     value = clean_task(value or "")
     # Parentheses may be aliases or trade notes, not separate contractor names.
     # 長樂（長盛） = 長樂 / 長樂長盛.
+    if value in {"德鸿", "德鴻"}:
+        return "德鴻"
     if value.startswith("長樂"):
         return "長樂"
     # 美時有時會寫「美時（平水）」/「美時（泥水）」等，統一為美時。
@@ -184,8 +198,6 @@ TASK_NORMALIZATION = [
     ("測量", "Setting out"),
     ("打地台碼石矢", "打石矢"),
     ("開線", "開墨"),
-    ("点焊", "燒焊"),
-    ("點焊", "燒焊"),
     ("清垃圾", "site cleanliness"),
     ("執石矢defect", "石矢defect"),
 ]
@@ -423,6 +435,18 @@ def parse_colon_form(line: str):
     m = rest_count
     if not is_valid_contractor(contractor) or not m:
         return None
+
+    # Form: 陳橋：Zone1，3人噴粗料，1人清場
+    # Keep leading zone and split each counted task into a separate row.
+    if len(list(HEADCOUNT_RE.finditer(rest))) >= 2:
+        leading_zone, _ = extract_zone(rest[:m.start()])
+        counted_items = parse_counted_task_items(rest[m.start():])
+        if counted_items:
+            rows = []
+            for item in counted_items:
+                rows.append({"分判": contractor, "工種": worker_type or "", **item, "分區": item.get("分區") or leading_zone})
+            return rows
+
     count = m.group(1)
     before = clean_task(rest[:m.start()])
     after = clean_task(rest[m.end():])
@@ -533,6 +557,13 @@ def maybe_extract_inline_record(line: str, current_contractor: str | None):
     count = m.group(1)
     before = final_clean_task(line[:m.start()])
     after = clean_task(line[m.end():])
+
+    # Continuation under a contractor heading: Zone1-5，2人清理廢鐵料
+    if current_contractor and is_valid_contractor(current_contractor):
+        z_cont, before_no_zone_cont = extract_zone(before)
+        before_no_zone_cont = clean_task(before_no_zone_cont).strip('，,、')
+        if z_cont and not before_no_zone_cont and after:
+            return {"分判": current_contractor, "工序": final_clean_task(after), "人數": count, "分區": z_cont}
 
     total_then_detail = re.match(r'^(?P<contractor>[\u4e00-\u9fff]{2,8})$', before)
     detail = re.match(r'^(?P<count>\d+)人(?P<rest>.+)$', after)
@@ -732,6 +763,10 @@ def parse_segment(seg: dict):
     for line in lines:
         line = strip_list_marker(line)
         if any(hint in line for hint in IGNORE_TASK_HINTS):
+            pending_task_line = None
+            continue
+        # 小計/總數行不是施工記錄，例如 德鴻... / 合共19人。
+        if re.match(r"^(合共|共計|总计|總計)\s*\d+人", line):
             pending_task_line = None
             continue
         pending_colon = parse_colon_headcount_with_pending(line, pending_task_line)

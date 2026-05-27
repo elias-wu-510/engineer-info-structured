@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import tempfile
+import fcntl
 import threading
 import time
 import html
@@ -1386,7 +1387,21 @@ def env_value(name: str, default: str | None = None, required: bool = False) -> 
     return value
 
 
+
+def acquire_single_instance_lock() -> object:
+    lock_path = Path(os.environ.get('ENGINEER_LOCK_FILE', '/tmp/engineer_info_structured_hook.lock'))
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = lock_path.open('w')
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit(f'Another engineer_hook_service is already running (lock: {lock_path})')
+    fh.write(str(os.getpid()))
+    fh.flush()
+    return fh
+
 def main():
+    _single_instance_lock = acquire_single_instance_lock()
     load_dotenv(DEFAULT_ENV_FILE)
     p = argparse.ArgumentParser(description='Engineer info structured long-running hook: import Feishu and send WhatsApp summary on 總結')
     p.add_argument('--log-dir', default=env_value('ENGINEER_LOG_DIR', DEFAULT_LOG_DIR, required=True))
