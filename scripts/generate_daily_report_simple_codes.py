@@ -90,6 +90,50 @@ def load_china_state_staff_mapping(wb):
         mapping[norm(title)] = {'daily_code': 'S12', 'source': sheet_name + ':manual_safety_alias'}
     return mapping
 
+
+def load_supplemental_unwritten_mapping(path):
+    """Load user-filled 未寫入工種 workbook: company heading + trade rows + code in col B.
+
+    Returns company+trade mapping and unique trade fallback mapping.
+    """
+    if not path:
+        return {}, {}, {}
+    p = Path(path)
+    if not p.exists():
+        return {}, {}, {}
+    wb = load_workbook(p, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    by_company_trade = {}
+    by_trade_candidates = defaultdict(list)
+    company = None
+    for r in range(1, ws.max_row+1):
+        c1 = ws.cell(r,1).value
+        c2 = ws.cell(r,2).value
+        if c1 is None:
+            continue
+        name = str(c1).strip()
+        if not name or name == '累計':
+            continue
+        code_raw = '' if c2 is None else str(c2).strip().upper()
+        if not code_raw:
+            company = name
+            continue
+        # Column B can be numeric Labour code (7/21/22) or B/S code.
+        code = code_raw.replace('.0','')
+        item = {'daily_code': code, 'company': company, 'trade': name, 'source': 'supplemental_unwritten', 'source_row': r}
+        if company:
+            by_company_trade[norm(company) + norm(name)] = item
+        by_trade_candidates[norm(name)].append(item)
+    by_trade = {}
+    ambiguous = {}
+    for trade_key, items in by_trade_candidates.items():
+        codes = {i['daily_code'] for i in items}
+        if len(codes) == 1:
+            by_trade[trade_key] = items[0]
+        else:
+            ambiguous[trade_key] = items
+    return by_company_trade, by_trade, ambiguous
+
 def load_daily_code_names(wb):
     ws = wb['daily report碼表']
     names = {}
@@ -123,10 +167,11 @@ def parse_access_report(path):
             records.append({'company': company, 'trade': name_s, 'count': count, 'row': r})
     return records, report_date
 
-def generate(mapping_path, access_path, output_path, summary_path=None):
+def generate(mapping_path, access_path, output_path, summary_path=None, supplemental_mapping_path=None):
     map_wb = load_workbook(mapping_path, data_only=False)
     cic_map, cic_by_trade, ambiguous_by_trade = load_cic_mapping(map_wb)
     china_state_staff_by_trade = load_china_state_staff_mapping(map_wb)
+    supp_map, supp_by_trade, supp_ambiguous = load_supplemental_unwritten_mapping(supplemental_mapping_path)
     code_names = load_daily_code_names(map_wb)
     records, report_date = parse_access_report(access_path)
     allowed = set(wanted_codes())
@@ -137,7 +182,12 @@ def generate(mapping_path, access_path, output_path, summary_path=None):
         method = 'company_trade'
         if not m:
             tk = norm(rec['trade'])
-            if tk in cic_by_trade:
+            supp_key = norm(rec['company']) + tk
+            if supp_key in supp_map:
+                m = supp_map[supp_key]; method = 'supplement_company_trade'
+            elif tk in supp_by_trade:
+                m = supp_by_trade[tk]; method = 'supplement_trade_fallback'
+            elif tk in cic_by_trade:
                 m = cic_by_trade[tk]; method = 'trade_fallback'
             elif tk in china_state_staff_by_trade:
                 m = china_state_staff_by_trade[tk]; method = 'china_state_staff_trade'
@@ -215,6 +265,7 @@ if __name__ == '__main__':
     ap.add_argument('--access-report', required=True)
     ap.add_argument('--output', required=True)
     ap.add_argument('--summary')
+    ap.add_argument('--supplemental-mapping')
     args=ap.parse_args()
-    s=generate(args.mapping,args.access_report,args.output,args.summary)
+    s=generate(args.mapping,args.access_report,args.output,args.summary,args.supplemental_mapping)
     print(json.dumps({k:s[k] for k in ['access_total','included_total','excluded_total','matched_record_count','excluded_record_count']}, ensure_ascii=False, indent=2))
