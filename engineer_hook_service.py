@@ -1166,6 +1166,16 @@ def build_process_text_summary(rows: list[dict], report_date: str) -> str:
     lines.append(f'總計：{sum(totals.values())}人；工序項目：{len(rows)}項')
     return '\n'.join(lines)
 
+
+def source_group_from_log_dir(log_file: Path) -> str | None:
+    """Derive original WhatsApp group id from the watched log directory.
+
+    ENGINEER_LOG_DIR points to .../<group-id>@g.us. Date-error warnings should go
+    back to that formal/source group, not necessarily the summary target group.
+    """
+    name = log_file.parent.name
+    return name if name.endswith('@g.us') else None
+
 def feishu_import_worker(log_file: Path, args, log_text: str | None = None):
     try:
         ensure_daily_table()
@@ -1180,11 +1190,12 @@ def feishu_import_worker(log_file: Path, args, log_text: str | None = None):
                         send_reaction(msg_id, '❌', args.react_url, dry_run=args.dry_run)
                     except Exception as react_exc:
                         print(f'WARN: invalid-date reaction failed for {msg_id}: {react_exc}', flush=True)
-            if args.target_group and args.send_url:
+            warn_target = source_group_from_log_dir(log_file) or args.target_group
+            if warn_target and args.send_url:
                 try:
-                    send_whatsapp(args.target_group, warn, args.send_url, dry_run=args.dry_run)
+                    send_whatsapp(warn_target, warn, args.send_url, dry_run=args.dry_run)
                 except Exception as send_exc:
-                    print(f'WARN: invalid-date warning send failed: {send_exc}', flush=True)
+                    print(f'WARN: invalid-date warning send failed target={warn_target}: {send_exc}', flush=True)
         if created:
             print(f'Imported {created} new rows from {log_file.name}', flush=True)
             if log_text:
