@@ -3,7 +3,7 @@ import argparse
 import re
 from pathlib import Path
 
-LOG_LINE_RE = re.compile(r"^\[(?P<ts>[^\]]+)\] \[LOG\] 文本消息内容: (?P<content>.*)$")
+LOG_LINE_RE = re.compile(r"^\[(?P<ts>[^\]]+)\] \[LOG\] (?:文本|图文)消息内容: (?P<content>.*)$")
 DEBUG_SENDER_RE = re.compile(r"^\[(?P<ts>[^\]]+)\] \[DEBUG 发送人的number, name, pushname分别是\]\s*(?P<number>\S+)?\s*(?P<name>\S+)?\s*(?P<pushname>.*)$")
 INSP_BOT_METADATA_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] (?:重新强制获取消息|收到消息，|\[DEBUG )")
 

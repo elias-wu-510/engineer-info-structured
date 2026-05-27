@@ -24,7 +24,7 @@ DEFAULT_SEND_URL = None
 DEFAULT_REACT_URL = None
 SUMMARY_RE = re.compile(r'(?:总结|總結|summary)', re.I)
 PROCESS_SUMMARY_RE = re.compile(r'(?:工序總結|工序总结|工序表|process\s*summary|process\s*table)', re.I)
-LOG_MSG_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] \[LOG\] 文本消息内容: (?P<content>.*)$')
+LOG_MSG_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] \[LOG\] (?:文本|图文)消息内容: (?P<content>.*)$')
 RECEIVED_RE = re.compile(r'^\[(?P<ts>[^\]]+)\] 收到消息，.*?msgId: (?P<msg_id>[^,]+)')
 
 sys.path.insert(0, str(LEGACY_DIR))
