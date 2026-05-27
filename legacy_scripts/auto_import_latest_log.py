@@ -18,7 +18,12 @@ DEFAULT_POLICY = Path(os.environ.get('ENGINEER_POLICY_FILE', '.state/import-poli
 
 
 def row_fingerprint(row: dict) -> str:
-    base = '||'.join(str(row.get(k, '')) for k in CSV_COLUMNS)
+    # Business-content fingerprint. Do not include sender/time metadata, so if a
+    # user deletes and re-sends the same work report later it does not duplicate.
+    # Changed business content (date/location/contractor/task/headcount/raw body)
+    # still imports as a new row for review.
+    business_keys = ['日期', '分區', '樓棟', '樓層', '分判', '工序', '工種', '人數', '原始消息']
+    base = '||'.join(str(row.get(k, '')).strip() for k in business_keys)
     return hashlib.sha256(base.encode('utf-8')).hexdigest()
 
 
