@@ -59,8 +59,8 @@ def is_valid_contractor(value: str | None) -> bool:
     return bool(re.search(r"[\u4e00-\u9fff]", value))
 
 
-ROLE_SUFFIX_RE = re.compile(r"(?:墨斗工|焊工|炮手|男工|女工|工人|師傅)$")
-WORKER_TYPE_RE = re.compile(r"(搭棚工|棚工|男工|女工|外勞|焊工)")
+ROLE_SUFFIX_RE = re.compile(r"(?:墨斗工|墨斗|焊工|炮手|男工|女工|工人|師傅)$")
+WORKER_TYPE_RE = re.compile(r"(搭棚工|棚工|男工|女工|外勞|焊工|墨斗)")
 
 
 def split_worker_type(value: str | None) -> tuple[str, str | None]:
