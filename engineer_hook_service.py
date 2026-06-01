@@ -922,6 +922,38 @@ def load_process_keywords(path: str | None) -> list[str]:
         return []
 
 
+
+def load_process_merge_mapping(path: str | None) -> dict[str, str]:
+    if not path:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(p, data_only=True)
+        ws = wb['工序合併碼表'] if '工序合併碼表' in wb.sheetnames else wb[wb.sheetnames[0]]
+        mapping = {}
+        for r in range(2, ws.max_row + 1):
+            zh = str(ws.cell(r, 2).value or '').strip()
+            task = str(ws.cell(r, 3).value or '').strip()
+            en = str(ws.cell(r, 1).value or '').strip()
+            if task and zh:
+                mapping[task] = zh
+            elif task and en and en != '未有英文分類':
+                mapping[task] = en
+        return mapping
+    except Exception as e:
+        print(f'WARN: failed to load process merge mapping from {p}: {e}', flush=True)
+        return {}
+
+
+def normalize_process_with_merge(task: str, keywords: list[str], merge_mapping: dict[str, str]) -> str:
+    raw = str(task or '').strip() or '未標明工序'
+    if raw in merge_mapping:
+        return merge_mapping[raw]
+    return normalize_process(raw, keywords)
+
 def normalize_process(task: str, keywords: list[str]) -> str:
     raw = str(task or '').strip() or '未標明工序'
     for kw in keywords:
@@ -930,14 +962,15 @@ def normalize_process(task: str, keywords: list[str]) -> str:
     return raw
 
 
-def aggregate_process_headcount(rows: list[dict], requested_date: str | None, keyword_path: str | None, filter_record_date: bool = True) -> list[dict]:
+def aggregate_process_headcount(rows: list[dict], requested_date: str | None, keyword_path: str | None, filter_record_date: bool = True, merge_path: str | None = None) -> list[dict]:
     keywords = load_process_keywords(keyword_path)
+    merge_mapping = load_process_merge_mapping(merge_path)
     grouped = {}
     for r in rows:
         if requested_date and filter_record_date and display_record_date(r.get('日期')) != requested_date:
             continue
         building = summary_building_label(r.get('樓棟'))
-        process = normalize_process(r.get('工序'), keywords)
+        process = normalize_process_with_merge(r.get('工序'), keywords, merge_mapping)
         count_raw = str(r.get('人數') or '').strip()
         count = int(count_raw) if count_raw.isdigit() else 0
         floor = str(r.get('樓層') or '').strip()
@@ -1286,7 +1319,7 @@ def run_once(args, service_state: dict):
         except Exception as e:
             print(f'WARN: process summary read from Feishu failed, fallback to log parse: {e}', flush=True)
             rows = parse_rows_for_summary(log_file, Path(args.import_state_file), Path(args.policy_file))
-        process_rows = aggregate_process_headcount(rows, requested_date, args.process_keyword_xlsx, filter_record_date=False)
+        process_rows = aggregate_process_headcount(rows, requested_date, args.process_keyword_xlsx, filter_record_date=False, merge_path=args.process_merge_xlsx)
         table_name = '工序人數表-' + (table_name_from_display_date(report_date) or date.today().isoformat())
         if not args.dry_run:
             table_id = ensure_named_feishu_table(table_name, PROCESS_TABLE_FIELDS)
@@ -1330,7 +1363,7 @@ def run_once(args, service_state: dict):
         send_whatsapp_file(args.target_group, floor_pdf_path, args.send_url, filename=floor_pdf_path.name, caption=f'樓層明細表 {report_date}', dry_run=args.dry_run)
 
         # 3) Process headcount Feishu table + text summary + WhatsApp image.
-        process_rows = aggregate_process_headcount(rows, report_date, args.process_keyword_xlsx, filter_record_date=False)
+        process_rows = aggregate_process_headcount(rows, report_date, args.process_keyword_xlsx, filter_record_date=False, merge_path=args.process_merge_xlsx)
         process_table_name = '工序人數表-' + (table_name_from_display_date(report_date) or date.today().isoformat())
         if not args.dry_run:
             process_table_id = ensure_named_feishu_table(process_table_name, PROCESS_TABLE_FIELDS)
@@ -1414,6 +1447,7 @@ def main():
     p.add_argument('--react-url', default=env_value('ENGINEER_REACT_URL', DEFAULT_REACT_URL, required=True))
     p.add_argument('--interval', type=float, default=5.0)
     p.add_argument('--process-keyword-xlsx', default=env_value('ENGINEER_PROCESS_KEYWORD_XLSX'))
+    p.add_argument('--process-merge-xlsx', default=env_value('ENGINEER_PROCESS_MERGE_XLSX'))
     p.add_argument('--report-dir', default=env_value('ENGINEER_REPORT_DIR', '/home/claw/.openclaw/workspace-engineer-info-structured/reports'))
     p.add_argument('--once', action='store_true')
     p.add_argument('--dry-run', action='store_true')
