@@ -924,6 +924,24 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
         out['分區'] = f'{m_zone_range.group(1)}~{m_task_range.group(1)}'
         out['工序'] = m_task_range.group(2).strip()
 
+    # Keep direction + bay ranges as 分區: 北面B7~9, 北面B 8, 北面B7 ~B8.
+    zone_now = str(out.get('分區') or '').strip()
+    task_now = str(out.get('工序') or '').strip()
+    m_dir_bay = re.match(r'^(北面|南面|東面|西面)\s*([A-Z]?\d+)\s*$', zone_now, re.I)
+    m_task_bay_range = re.match(r'^~\s*([A-Z]?\d+)\s*(.+)$', task_now, re.I)
+    if m_dir_bay and m_task_bay_range:
+        out['分區'] = f'{m_dir_bay.group(1)}{m_dir_bay.group(2)}~{m_task_bay_range.group(1)}'
+        out['工序'] = m_task_bay_range.group(2).strip()
+    m_task_bay = re.match(r'^([A-Z])\s*(\d+)\s+(.+)$', task_now, re.I)
+    if zone_now in {'北面', '南面', '東面', '西面'} and m_task_bay:
+        out['分區'] = f'{zone_now}{m_task_bay.group(1)} {m_task_bay.group(2)}'
+        out['工序'] = m_task_bay.group(3).strip()
+    m_floor_bay = re.match(r'^(\d+)\s*/\s*F\s+([A-Z]\d+\s*~\s*[A-Z]?\d+)\s+(.+)$', task_now, re.I)
+    if zone_now in {'北面', '南面', '東面', '西面'} and m_floor_bay:
+        out['樓層'] = f'{m_floor_bay.group(1)}/F'
+        out['分區'] = f'{zone_now}{m_floor_bay.group(2)}'
+        out['工序'] = m_floor_bay.group(3).strip()
+
     return out
 
 
