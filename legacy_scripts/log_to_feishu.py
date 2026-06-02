@@ -904,6 +904,17 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
             continue
         seen.add(key)
         out.append(row)
+    # Headers like "B座 B1" / "C座 B2" are block + basement zone markers;
+    # put B1/B2 into 分區, not 樓層.
+    m_bzone = re.search(r'([ABC]座)\s*(B\d+)\b', raw, re.I)
+    if m_bzone and str(out.get('樓棟') or '').strip() == m_bzone.group(1):
+        zone_now = str(out.get('分區') or '').strip().lower()
+        floor_now = str(out.get('樓層') or '').strip()
+        if zone_now in {'', 'null'} or floor_now == m_bzone.group(2):
+            out['分區'] = m_bzone.group(2)
+            if floor_now == m_bzone.group(2):
+                out['樓層'] = 'null'
+
     return out
 
 
