@@ -1187,6 +1187,38 @@ def render_floor_detail_report(rows: list[dict], report_date: str, report_dir: s
         png_path.write_bytes(b'')
     return png_path
 
+
+def render_process_excel(rows: list[dict], report_date: str, report_dir: str | None) -> Path:
+    out_dir = Path(report_dir or os.environ.get('ENGINEER_REPORT_DIR') or '/home/claw/.openclaw/workspace-engineer-info-structured/reports')
+    out_dir.mkdir(parents=True, exist_ok=True)
+    iso = table_name_from_display_date(report_date) or date.today().isoformat()
+    xlsx_path = out_dir / f'process-summary-{iso}.xlsx'
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '工序人數表'
+    ws.append(['日期', '樓棟', '工序', '樓層/分區', '人數'])
+    for r in rows:
+        ws.append([report_date, r.get('樓棟', ''), r.get('工序', ''), r.get('樓層/分區', ''), int(r.get('人數') or 0)])
+    thin = Side(style='thin', color='999999')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='D9EAF7')
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = border
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        for cell in row:
+            cell.border = border
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+    ws.freeze_panes = 'A2'
+    widths = {'A': 16, 'B': 12, 'C': 34, 'D': 80, 'E': 10}
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+    wb.save(xlsx_path)
+    return xlsx_path
+
 def render_process_report(rows: list[dict], report_date: str, report_dir: str | None) -> tuple[Path, Path]:
     out_dir = Path(report_dir or os.environ.get('ENGINEER_REPORT_DIR') or '/home/claw/.openclaw/workspace-engineer-info-structured/reports')
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1328,12 +1360,12 @@ def run_once(args, service_state: dict):
         else:
             print(f'DRY RUN: would update Feishu process table {table_name} rows={len(process_rows)}', flush=True)
         html_path, png_path = render_process_report(process_rows, report_date, args.report_dir)
+        xlsx_path = render_process_excel(process_rows, report_date, args.report_dir)
         text_summary = build_process_text_summary(process_rows, report_date)
         send_whatsapp(args.target_group, text_summary, args.send_url, dry_run=args.dry_run)
-        pdf_path = png_to_pdf(png_path)
-        send_whatsapp_file(args.target_group, pdf_path, args.send_url, filename=pdf_path.name, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
+        send_whatsapp_file(args.target_group, xlsx_path, args.send_url, filename=xlsx_path.name, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
         send_reaction(process_msg_id, '✅', args.react_url, dry_run=args.dry_run)
-        print(f'Sent process summary to {args.target_group}; files: {html_path}, {png_path}', flush=True)
+        print(f'Sent process summary to {args.target_group}; files: {html_path}, {png_path}, {xlsx_path}', flush=True)
     elif normal_text:
         summary_triggered = True
         trigger_msg_id, trigger_text = normal_msg_id, normal_text
@@ -1370,10 +1402,10 @@ def run_once(args, service_state: dict):
             replace_feishu_records(process_table_id, [{**r, '日期': report_date} for r in process_rows], numeric_fields=set())
             print(f'Updated Feishu process table {process_table_name} rows={len(process_rows)}', flush=True)
         process_html_path, process_png_path = render_process_report(process_rows, report_date, args.report_dir)
+        process_xlsx_path = render_process_excel(process_rows, report_date, args.report_dir)
         process_text_summary = build_process_text_summary(process_rows, report_date)
         send_whatsapp(args.target_group, process_text_summary, args.send_url, dry_run=args.dry_run)
-        process_pdf_path = png_to_pdf(process_png_path)
-        send_whatsapp_file(args.target_group, process_pdf_path, args.send_url, filename=process_pdf_path.name, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
+        send_whatsapp_file(args.target_group, process_xlsx_path, args.send_url, filename=process_xlsx_path.name, caption=f'工序人數表 {report_date}', dry_run=args.dry_run)
 
         send_reaction(trigger_msg_id, '✅', args.react_url, dry_run=args.dry_run)
         print(f'Sent text summaries, floor detail, and process report to {args.target_group}', flush=True)
