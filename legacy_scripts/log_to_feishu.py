@@ -942,6 +942,14 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
         out['分區'] = f'{zone_now}{m_floor_bay.group(2)}'
         out['工序'] = m_floor_bay.group(3).strip()
 
+    # Move leading bay marker in task into 分區: AB橋底 + B13Sunken Core窿 -> 分區=AB橋底 B13, 工序=Sunken Core窿.
+    zone_now = str(out.get('分區') or '').strip()
+    task_now = str(out.get('工序') or '').strip()
+    m_task_leading_bay = re.match(r'^(B\d{1,2})(.+)$', task_now, re.I)
+    if m_task_leading_bay and zone_now and zone_now.lower() != 'null':
+        out['分區'] = f'{zone_now} {m_task_leading_bay.group(1)}'
+        out['工序'] = m_task_leading_bay.group(2).strip()
+
     return out
 
 
