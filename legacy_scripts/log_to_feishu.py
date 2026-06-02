@@ -915,6 +915,15 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
             if floor_now == m_bzone.group(2):
                 out['樓層'] = 'null'
 
+    # Repair split zone ranges like 分區=zone 3, 工序=~4 拆棚 -> 分區=zone 3~4, 工序=拆棚.
+    zone_now = str(out.get('分區') or '').strip()
+    task_now = str(out.get('工序') or '').strip()
+    m_zone_range = re.match(r'^(zone\s*\d+)\s*$', zone_now, re.I)
+    m_task_range = re.match(r'^~\s*(\d+)\s*(.+)$', task_now)
+    if m_zone_range and m_task_range:
+        out['分區'] = f'{m_zone_range.group(1)}~{m_task_range.group(1)}'
+        out['工序'] = m_task_range.group(2).strip()
+
     return out
 
 
