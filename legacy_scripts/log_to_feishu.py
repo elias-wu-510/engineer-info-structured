@@ -963,6 +963,13 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
                 if nv != v:
                     out[k] = nv or 'null'
 
+    # Bay/core markers like B10/BA at the start of 工序 belong to 分區.
+    task_now = str(out.get('工序') or '').strip()
+    m_task_bay_core = re.match(r'^(B\d+(?:~\d+)?/[A-Z]{1,2})\s+(.+)$', task_now, re.I)
+    if m_task_bay_core:
+        out['分區'] = m_task_bay_core.group(1)
+        out['工序'] = m_task_bay_core.group(2).strip()
+
     return out
 
 
