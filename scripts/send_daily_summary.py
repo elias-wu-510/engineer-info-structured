@@ -19,6 +19,7 @@ def main():
     send_url = os.environ['ENGINEER_SEND_URL']
     report_dir = os.environ.get('ENGINEER_REPORT_DIR')
     keyword_xlsx = os.environ.get('ENGINEER_PROCESS_KEYWORD_XLSX')
+    merge_xlsx = os.environ.get('ENGINEER_PROCESS_MERGE_XLSX')
 
     rows = svc.parse_rows_for_summary_from_feishu(requested_date=report_date, filter_record_date=False)
     print(f'Daily summary {report_date}: rows={len(rows)} target={target}', flush=True)
@@ -35,15 +36,15 @@ def main():
     svc.send_whatsapp_file(target, floor_pdf, send_url, filename=floor_pdf.name, caption=f'樓層明細表 {report_date}')
     print(f'Updated/sent {table_name} {table_id} rows={detail_count}', flush=True)
 
-    # 3) Process headcount Feishu table + text summary + PDF file.
-    process_rows = svc.aggregate_process_headcount(rows, report_date, keyword_xlsx, filter_record_date=False)
+    # 3) Process headcount Feishu table + text summary + Excel file.
+    process_rows = svc.aggregate_process_headcount(rows, report_date, keyword_xlsx, filter_record_date=False, merge_path=merge_xlsx)
     process_table_name = '工序人數表-' + (svc.table_name_from_display_date(report_date) or date.today().isoformat())
     process_table_id = svc.ensure_named_feishu_table(process_table_name, svc.PROCESS_TABLE_FIELDS)
     svc.replace_feishu_records(process_table_id, [{**r, '日期': report_date} for r in process_rows], numeric_fields=set())
-    _, process_png = svc.render_process_report(process_rows, report_date, report_dir)
-    process_pdf = svc.png_to_pdf(process_png)
+    svc.render_process_report(process_rows, report_date, report_dir)
+    process_xlsx = svc.render_process_excel(process_rows, report_date, report_dir)
     svc.send_whatsapp(target, svc.build_process_text_summary(process_rows, report_date), send_url)
-    svc.send_whatsapp_file(target, process_pdf, send_url, filename=process_pdf.name, caption=f'工序人數表 {report_date}')
+    svc.send_whatsapp_file(target, process_xlsx, send_url, filename=process_xlsx.name, caption=f'工序人數表 {report_date}')
     print(f'Updated/sent {process_table_name} {process_table_id} rows={len(process_rows)}', flush=True)
 
 
