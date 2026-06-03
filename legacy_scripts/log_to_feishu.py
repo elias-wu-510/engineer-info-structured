@@ -970,6 +970,19 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
         out['分區'] = m_task_bay_core.group(1)
         out['工序'] = m_task_bay_core.group(2).strip()
 
+    # Ranges like 16-UR/F / 16~UR/F are floor ranges.
+    raw_floor_ur_range = re.search(r'\b(\d+)\s*[-~]\s*UR\s*/\s*F\b', raw, re.I)
+    if raw_floor_ur_range:
+        floor_text = f'{raw_floor_ur_range.group(1)}-UR/F'
+        hay = ' '.join(str(out.get(k) or '') for k in ['樓層', '分區', '工序'])
+        if re.search(r'\b' + re.escape(raw_floor_ur_range.group(1)) + r'\s*[-~]\s*UR\s*/\s*F\b', hay, re.I):
+            out['樓層'] = floor_text
+            for k in ['分區', '工序']:
+                v = str(out.get(k) or '')
+                nv = re.sub(r'\b' + re.escape(raw_floor_ur_range.group(1)) + r'\s*[-~]\s*UR\s*/\s*F\b', '', v, flags=re.I).strip(' -，,')
+                if nv != v:
+                    out[k] = nv or 'null'
+
     return out
 
 
