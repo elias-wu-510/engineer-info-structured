@@ -983,6 +983,13 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
                 if nv != v:
                     out[k] = nv or 'null'
 
+    # Bay ranges like B7-B9 / B4-B6 at the start of 工序 belong to 分區.
+    task_now = str(out.get('工序') or '').strip()
+    m_task_bay_dash = re.match(r'^(B\d+\s*[-~]\s*B?\d+)\s+(.+)$', task_now, re.I)
+    if m_task_bay_dash:
+        out['分區'] = m_task_bay_dash.group(1).replace(' ', '')
+        out['工序'] = m_task_bay_dash.group(2).strip()
+
     return out
 
 
