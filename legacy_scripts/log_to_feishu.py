@@ -950,6 +950,19 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
         out['分區'] = f'{zone_now} {m_task_leading_bay.group(1)}'
         out['工序'] = m_task_leading_bay.group(2).strip()
 
+    # M~12/F / M-12/F style ranges are floor ranges, not zones or tasks.
+    raw_floor_m_range = re.search(r'\bM\s*[~-]\s*(\d+)\s*/\s*F\b', raw, re.I)
+    if raw_floor_m_range:
+        floor_text = f'M~{raw_floor_m_range.group(1)}/F'
+        hay = ' '.join(str(out.get(k) or '') for k in ['樓層', '分區', '工序'])
+        if floor_text.replace(' ', '').lower() in hay.replace(' ', '').lower() or re.search(r'\bM\s*[~-]\s*' + re.escape(raw_floor_m_range.group(1)) + r'\s*/\s*F\b', hay, re.I):
+            out['樓層'] = floor_text
+            for k in ['分區', '工序']:
+                v = str(out.get(k) or '')
+                nv = re.sub(r'\bM\s*[~-]\s*' + re.escape(raw_floor_m_range.group(1)) + r'\s*/\s*F\b', '', v, flags=re.I).strip(' -，,')
+                if nv != v:
+                    out[k] = nv or 'null'
+
     return out
 
 
