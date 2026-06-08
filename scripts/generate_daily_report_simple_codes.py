@@ -32,6 +32,50 @@ def strip_trade_prefix(v):
     text = str(v or "").strip()
     return re.sub(r"^[A-Za-z]+-?\d+[-－–—]\s*", "", text).strip()
 
+
+def load_latest_gate_mapping(wb):
+    """Load manually curated workbook sheet 最新工種對應碼表.
+
+    Columns: 來源, 公司/分判, 出入閘工種/職位, 對應碼號, Daily Report工種名, CIC/備註.
+    Returns company+trade mapping, unique trade fallback, ambiguous trade map, and code names.
+    """
+    if '最新工種對應碼表' not in wb.sheetnames:
+        return None
+    ws = wb['最新工種對應碼表']
+    by_company_trade = {}
+    by_trade_candidates = defaultdict(list)
+    code_names = {}
+    for r in range(2, ws.max_row + 1):
+        source = ws.cell(r, 1).value
+        company = ws.cell(r, 2).value
+        trade = ws.cell(r, 3).value
+        code = ws.cell(r, 4).value
+        daily_name = ws.cell(r, 5).value
+        if not trade or not code:
+            continue
+        code_s = str(code).strip().upper().replace('.0', '')
+        item = {
+            'daily_code': code_s,
+            'company': company,
+            'trade': trade,
+            'source': source or '最新工種對應碼表',
+            'source_row': r,
+        }
+        if daily_name and code_s not in code_names:
+            code_names[code_s] = daily_name
+        if company:
+            by_company_trade[norm(company) + norm(trade)] = item
+        by_trade_candidates[norm(trade)].append(item)
+    by_trade = {}
+    ambiguous = {}
+    for trade_key, items in by_trade_candidates.items():
+        codes = {i['daily_code'] for i in items}
+        if len(codes) == 1:
+            by_trade[trade_key] = items[0]
+        else:
+            ambiguous[trade_key] = items
+    return by_company_trade, by_trade, ambiguous, code_names
+
 def load_cic_mapping(wb):
     ws = wb['CIC工種對應表']
     by_company_trade = {}
@@ -169,10 +213,16 @@ def parse_access_report(path):
 
 def generate(mapping_path, access_path, output_path, summary_path=None, supplemental_mapping_path=None):
     map_wb = load_workbook(mapping_path, data_only=False)
-    cic_map, cic_by_trade, ambiguous_by_trade = load_cic_mapping(map_wb)
-    china_state_staff_by_trade = load_china_state_staff_mapping(map_wb)
-    supp_map, supp_by_trade, supp_ambiguous = load_supplemental_unwritten_mapping(supplemental_mapping_path)
-    code_names = load_daily_code_names(map_wb)
+    latest = load_latest_gate_mapping(map_wb)
+    if latest:
+        cic_map, cic_by_trade, ambiguous_by_trade, code_names = latest
+        china_state_staff_by_trade = {}
+        supp_map, supp_by_trade, supp_ambiguous = {}, {}, {}
+    else:
+        cic_map, cic_by_trade, ambiguous_by_trade = load_cic_mapping(map_wb)
+        china_state_staff_by_trade = load_china_state_staff_mapping(map_wb)
+        supp_map, supp_by_trade, supp_ambiguous = load_supplemental_unwritten_mapping(supplemental_mapping_path)
+        code_names = load_daily_code_names(map_wb)
     records, report_date = parse_access_report(access_path)
     allowed = set(wanted_codes())
     counts = Counter(); excluded=[]; matched=[]
@@ -253,6 +303,7 @@ def generate(mapping_path, access_path, output_path, summary_path=None, suppleme
         'matched_record_count': len(matched),
         'excluded_record_count': len(excluded),
         'counts_by_code': dict(counts),
+        'mapping_source': '最新工種對應碼表' if latest else 'legacy_mapping',
         'excluded': excluded,
     }
     if summary_path:
