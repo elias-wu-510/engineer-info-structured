@@ -30,7 +30,7 @@ INVALID_CONTRACTOR_VALUES = {
 }
 
 KNOWN_TASKS = [
-    "打基仔石矢，清場", "打基仔石矢 ,清場", "點焊及回焊", "打拆掌板邊石矢", "唧膠試水", "雜工，安全及管理", "組裝橋料", "裝燈喉", "打爆版石矢", "安裝Drywall", "BS Opening吊板", "BS opening 吊板", "鑽窿", "鏟地台+清理", "鏟地台", "剷地台", "炮尾", "石矢", "墨斗", "跟炮尾清泥頭", "清場", "磚牆",
+    "安全執整，封地台吼，止水", "打基仔石矢，清場", "打基仔石矢 ,清場", "點焊及回焊", "打拆掌板邊石矢", "唧膠試水", "雜工，安全及管理", "組裝橋料", "裝燈喉", "打爆版石矢", "安裝Drywall", "BS Opening吊板", "BS opening 吊板", "鑽窿", "鏟地台+清理", "鏟地台", "剷地台", "炮尾", "石矢", "墨斗", "跟炮尾清泥頭", "清場", "磚牆",
     "公眾位出泥柱", "公眾位包角", "產地台", "跟炮尾", "磚牆釘網", "磚牆包角",
     "出泥柱", "砌磚", "批幼料", "砌磚牆", "牆身釘網", "大機房噴油漆",
     "裝線槽", "PD裝喉", "線坑批蘯", "mark位 裝燈喉", "天花過面", "HR種鐵", "地台出餅仔",
@@ -989,6 +989,13 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
     if m_task_bay_dash:
         out['分區'] = m_task_bay_dash.group(1).replace(' ', '')
         out['工序'] = m_task_bay_dash.group(2).strip()
+
+    # Multi-floor suffix like '- 10,11樓' belongs to 樓層 and should stay one row.
+    task_now = str(out.get('工序') or '').strip()
+    m_floor_suffix = re.search(r'[-—]\s*((?:\d+\s*[,，]\s*)+\d+\s*樓)\s*$', task_now)
+    if m_floor_suffix:
+        out['樓層'] = re.sub(r'\s+', '', m_floor_suffix.group(1)).replace('，', ',')
+        out['工序'] = task_now[:m_floor_suffix.start()].strip(' -—，,')
 
     return out
 
